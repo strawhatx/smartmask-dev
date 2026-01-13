@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SmartMask - Remove Image Background | Free & Automatic",
-  description: "Remove image backgrounds automatically and get transparent PNGs in seconds. Free background removal tool powered by AI.",
+  title: "Smart Resizer - AI-Powered Image Resizing for Social Media",
+  description: "Resize images for social media automatically. AI-powered image resizing for Instagram, Facebook, Twitter, TikTok and more.",
 };
 
 export default function RootLayout({

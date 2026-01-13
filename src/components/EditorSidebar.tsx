@@ -74,6 +74,21 @@ export function EditorSidebar({
         </div>
       </div>
 
+      {/* Auto Padding */}
+      <div className="space-y-3 pt-4 border-t border-border">
+        <h4 className="text-sm font-medium text-muted-foreground">Auto Padding</h4>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Padding Amount</span>
+            <span className="text-xs text-muted-foreground">Auto</span>
+          </div>
+          <Slider defaultValue={[20]} max={100} step={5} className="w-full" />
+          <p className="text-xs text-muted-foreground">
+            Automatically adds padding around your image
+          </p>
+        </div>
+      </div>
+
       {/* Color picker for solid */}
       {selectedFill === 'solid' && (
         <motion.div
@@ -257,26 +272,74 @@ export function EditorSidebar({
     </div>
   );
 
+  const renderPlatformPanel = () => (
+    <div className="space-y-6">
+      <div className="space-y-3">
+        <h4 className="text-sm font-medium text-muted-foreground">Platform Size</h4>
+        <div className="space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto pr-2">
+          {platformPresets.map((preset) => {
+            const isSelected = selectedPreset?.id === preset.id;
+            return (
+              <button
+                key={preset.id}
+                onClick={() => onSelectPreset(preset)}
+                className={cn(
+                  "w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all duration-200 text-left",
+                  isSelected
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/30"
+                )}
+              >
+                <span className="text-xl">{preset.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-foreground truncate">
+                    {preset.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {preset.width} × {preset.height}
+                  </div>
+                </div>
+                {isSelected && (
+                  <Check className="w-4 h-4 text-primary" />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderCropPanel = () => (
+    <div className="space-y-6">
+      <div className="p-4 rounded-xl border border-border bg-muted/30">
+        <h4 className="text-sm font-medium text-foreground mb-4">Crop & Adjust</h4>
+        
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Smart Crop</span>
+              <Switch checked={smartCrop} onCheckedChange={onSmartCropChange} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              AI-powered composition adjustment
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderContent = () => {
     switch (activeTab) {
-      case 'cutout':
-        return renderCutoutPanel();
+      case 'platform':
+        return renderPlatformPanel();
+      case 'crop':
+        return renderCropPanel();
       case 'background':
         return renderBackgroundPanel();
-      case 'design':
-        return renderDesignPanel();
-      case 'effects':
-      case 'adjust':
       default:
-        return (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-              <Wand2 className="w-8 h-8 text-muted-foreground" />
-            </div>
-            <h4 className="font-medium text-foreground mb-1">Coming Soon</h4>
-            <p className="text-sm text-muted-foreground">This feature is under development</p>
-          </div>
-        );
+        return renderPlatformPanel();
     }
   };
 

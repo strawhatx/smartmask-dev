@@ -57,7 +57,7 @@ export function EditorCanvas({
   const aspectRatio = preset ? preset.width / preset.height : 16 / 9;
 
   return (
-    <div className="flex-1 flex items-center justify-center p-8 bg-muted/30 relative overflow-hidden">
+    <div className="flex-1 flex items-center justify-center p-4 bg-muted/30 relative overflow-hidden">
       {/* Checkerboard background for the entire canvas area */}
       <div 
         className="absolute inset-0"
@@ -68,34 +68,35 @@ export function EditorCanvas({
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="relative z-10 max-w-4xl w-full"
+        className="relative z-10 max-w-2xl w-full"
         style={{
           transform: `scale(${scale})`,
           transition: 'transform 0.2s ease',
         }}
       >
         <div
-          className="relative w-full rounded-lg overflow-hidden shadow-2xl"
+          className="relative w-full rounded-lg overflow-hidden shadow-lg"
           style={{
             aspectRatio: aspectRatio,
+            maxHeight: '70vh',
             ...getBackgroundStyle(),
           }}
         >
           {isProcessing ? (
             <div className="absolute inset-0 flex items-center justify-center bg-background/80">
-              <Loader2 className="w-10 h-10 text-primary animate-spin" />
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
             </div>
           ) : processedPreview ? (
             <img
               src={processedPreview}
               alt="Processed preview"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
             />
           ) : (
             <img
               src={imageSrc}
               alt="Original"
-              className="absolute inset-0 w-full h-full object-contain"
+              className="w-full h-full object-contain"
             />
           )}
         </div>
@@ -104,9 +105,9 @@ export function EditorCanvas({
       {/* Zoom button */}
       <button 
         onClick={() => setScale(s => s === 1 ? 1.5 : 1)}
-        className="absolute top-4 right-4 z-20 p-2 rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors"
+        className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-card border border-border shadow-sm hover:bg-muted transition-colors"
       >
-        <ZoomIn className="w-5 h-5 text-muted-foreground" />
+        <ZoomIn className="w-4 h-4 text-muted-foreground" />
       </button>
     </div>
   );

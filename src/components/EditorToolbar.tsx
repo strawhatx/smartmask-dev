@@ -1,9 +1,9 @@
 import { motion } from 'framer-motion';
-import { Scissors, ImageIcon, Sparkles, SlidersHorizontal, LayoutGrid, Undo2, Redo2, ChevronDown } from 'lucide-react';
+import { Monitor, Crop, Layers, Undo2, Redo2, ChevronDown, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
-export type EditorTab = 'cutout' | 'background' | 'effects' | 'adjust' | 'design';
+export type EditorTab = 'platform' | 'crop' | 'background';
 
 interface EditorToolbarProps {
   activeTab: EditorTab;
@@ -14,11 +14,9 @@ interface EditorToolbarProps {
 }
 
 const tabs: { id: EditorTab; label: string; icon: React.ReactNode }[] = [
-  { id: 'cutout', label: 'Cutout', icon: <Scissors className="w-4 h-4" /> },
-  { id: 'background', label: 'Background', icon: <ImageIcon className="w-4 h-4" /> },
-  { id: 'effects', label: 'Effects', icon: <Sparkles className="w-4 h-4" /> },
-  { id: 'adjust', label: 'Adjust', icon: <SlidersHorizontal className="w-4 h-4" /> },
-  { id: 'design', label: 'Design', icon: <LayoutGrid className="w-4 h-4" /> },
+  { id: 'platform', label: 'Platform', icon: <Monitor className="w-4 h-4" /> },
+  { id: 'crop', label: 'Crop', icon: <Crop className="w-4 h-4" /> },
+  { id: 'background', label: 'Background & Auto Padding', icon: <Layers className="w-4 h-4" /> },
 ];
 
 export function EditorToolbar({ activeTab, onTabChange, onDownload, canDownload, isProcessing }: EditorToolbarProps) {
@@ -26,7 +24,7 @@ export function EditorToolbar({ activeTab, onTabChange, onDownload, canDownload,
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex items-center justify-between px-4 py-3 bg-card border-b border-border"
+      className="flex items-center justify-between px-6 py-3 bg-background border-b border-border"
     >
       {/* Tabs */}
       <div className="flex items-center gap-1">
@@ -37,14 +35,22 @@ export function EditorToolbar({ activeTab, onTabChange, onDownload, canDownload,
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200",
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 relative",
                 isActive
-                  ? "bg-primary/10 text-primary"
+                  ? "text-primary"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
               )}
             >
               {tab.icon}
               <span>{tab.label}</span>
+              {isActive && (
+                <motion.div
+                  layoutId="activeTab"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full"
+                  initial={false}
+                  transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                />
+              )}
             </button>
           );
         })}

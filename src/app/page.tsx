@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import Link from 'next/link';
 import { useState } from 'react';
 
 export default function Home() {
@@ -75,9 +76,9 @@ export default function Home() {
             transparent PNGs that actually convert.
           </p>
           <div className="flex gap-4 justify-center flex-wrap">
-            <button className="bg-black text-white px-8 py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors">
+            <Link href="/editor" className="bg-black text-white px-8 py-3 rounded-lg font-semibold hover:bg-gray-800 transition-colors">
               Try Now
-            </button>
+            </Link>
             <button className="bg-white text-black border-2 border-black px-8 py-3 rounded-lg font-semibold hover:bg-gray-50 transition-colors">
               Demo
             </button>
