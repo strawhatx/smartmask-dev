@@ -56,7 +56,7 @@ export function DownloadModal({ isOpen, onClose, onDownload, isPro, imageName }:
                 <ul className="text-sm text-blue-800 space-y-1">
                   <li>✓ Resized to {imageName}</li>
                   <li>✓ Smart crop applied</li>
-                  <li>⚠ Small watermark added</li>
+
                   <li>⚠ Standard resolution</li>
                 </ul>
               </div>
@@ -71,7 +71,6 @@ export function DownloadModal({ isOpen, onClose, onDownload, isPro, imageName }:
                     <h4 className="font-semibold text-gray-900 mb-2">Upgrade to Pro</h4>
                     <ul className="text-sm text-gray-700 space-y-1 mb-4">
                       <li>✓ HD quality downloads</li>
-                      <li>✓ No watermarks</li>
                       <li>✓ Batch processing</li>
                       <li>✓ Ad-free experience</li>
                       <li>✓ Priority support</li>

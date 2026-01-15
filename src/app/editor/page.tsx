@@ -29,7 +29,7 @@ const TRANSPARENT_CHECKERBOARD_PATTERN = {
 
 // Types
 export type BackgroundType = 'blur' | 'color' | 'texture' | 'transparent';
-export type SidebarSection = 'home' | 'background' | 'ai-enhance' | 'crop' | 'resize' | 'watermark' | 'compress' | 'convert' | 'upscaler';
+export type SidebarSection = 'home' | 'background' | 'crop' | 'resize' | 'compress' | 'convert' | 'upscaler';
 
 export interface UploadedImage {
   id: string;
@@ -151,6 +151,7 @@ interface ImageItemProps {
   onCustomCropCancel: () => void;
   onApplyCropToImage: (imageId: string, aspectRatio: number | null, customCrop?: CropArea) => void;
   onSetImages: React.Dispatch<React.SetStateAction<UploadedImage[]>>;
+  resizePreview?: { width: number | null; height: number | null };
 }
 
 function ImageItem({ 
@@ -161,7 +162,8 @@ function ImageItem({
   onCustomCropApply,
   onCustomCropCancel,
   onApplyCropToImage,
-  onSetImages
+  onSetImages,
+  resizePreview
 }: ImageItemProps) {
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
@@ -201,17 +203,62 @@ function ImageItem({
 
   const cropOverlayRef = useRef<CropOverlayHandle | null>(null);
 
+  // Calculate aspect ratio for container
+  const getAspectRatio = () => {
+    // Use resize preview if available and image is selected
+    if (image.selected && resizePreview?.width && resizePreview?.height) {
+      return resizePreview.width / resizePreview.height;
+    }
+    // Use applied resize dimensions if available
+    if (image.resizeWidth && image.resizeHeight) {
+      return image.resizeWidth / image.resizeHeight;
+    }
+    // Default to square
+    return 1;
+  };
+
+  const aspectRatio = getAspectRatio();
+
+  // Calculate explicit size to fit within square
+  const getContainerStyle = () => {
+    if (aspectRatio === 1) {
+      return { width: '100%', height: '100%' };
+    }
+    // For non-square, fit within the square container
+    // The square container is 1:1, so we need to fit our aspect ratio within it
+    if (aspectRatio > 1) {
+      // Landscape: width is the limiting factor
+      return { 
+        width: '100%', 
+        height: `${100 / aspectRatio}%`,
+        maxHeight: '100%'
+      };
+    } else {
+      // Portrait: height is the limiting factor  
+      return { 
+        width: `${aspectRatio * 100}%`,
+        height: '100%',
+        maxWidth: '100%'
+      };
+    }
+  };
+
   return (
     <div className="flex flex-col">
-      <div
-        data-image-id={image.id}
-        className={cn(
-          "relative aspect-square rounded-xl overflow-hidden border-4 transition-all group",
-          image.isCustomCropActive || image.cropPreviewAspectRatio !== undefined ? "cursor-default" : "cursor-pointer",
-          image.selected 
-            ? "border-blue-500 shadow-lg" 
-            : "border-transparent hover:border-gray-300"
-        )}
+      <div className="relative aspect-square flex items-center justify-center overflow-hidden">
+        <div
+          data-image-id={image.id}
+          className={cn(
+            "relative rounded-xl overflow-hidden border-4 transition-all group",
+            image.isCustomCropActive || image.cropPreviewAspectRatio !== undefined ? "cursor-default" : "cursor-pointer",
+            image.selected 
+              ? "border-blue-500 shadow-lg" 
+              : "border-transparent hover:border-gray-300"
+          )}
+          style={{
+            aspectRatio: `${aspectRatio}`,
+            ...getContainerStyle()
+          }}
         onClick={() => {
           if (!image.isCustomCropActive && image.cropPreviewAspectRatio === undefined) {
             onToggleSelection(image.id);
@@ -271,8 +318,8 @@ function ImageItem({
             style={{
               width: 'auto',
               height: 'auto',
-              maxWidth: 'none',
-              maxHeight: 'none',
+              maxWidth: '100%',
+              maxHeight: '100%',
               objectFit: 'contain'
             }}
             loading="lazy"
@@ -362,6 +409,7 @@ function ImageItem({
             <ZoomIn className="w-3.5 h-3.5" aria-hidden="true" />
           </button>
         )}
+        </div>
       </div>
 
       {/* Dimension Label - Below Image */}
@@ -444,8 +492,9 @@ const getBackgroundStyle = (image: UploadedImage): React.CSSProperties | undefin
     case 'texture':
       return {
         backgroundImage: `url(${image.background})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center'
+        backgroundSize: '50%',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
       };
     case 'blur':
       return {
@@ -466,7 +515,6 @@ const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = [
   { id: 'background', icon: ImageIcon, label: 'Background' },
   { id: 'crop', icon: CropIcon, label: 'Crop' },
   { id: 'resize', icon: Maximize2, label: 'Resize' },
-  { id: 'watermark', icon: FileText, label: 'Watermark' },
   { id: 'compress', icon: Minimize2, label: 'Compress' },
   { id: 'convert', icon: RefreshCw, label: 'Convert' },
   { id: 'upscaler', icon: TrendingUp, label: 'Upscaler' },
@@ -474,6 +522,7 @@ const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = [
 
 export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
   const [activeSection, setActiveSection] = useState<SidebarSection>('home');
+  const [resizePreview, setResizePreview] = useState<{ width: number | null; height: number | null }>({ width: null, height: null });
   const [images, setImages] = useState<UploadedImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [customCropMode, setCustomCropMode] = useState(false);
@@ -1146,6 +1195,15 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
     setActiveSection(section);
   }, []);
 
+  const getAspectRatioPreview = (width: number, height: number, maxSize: number = 36) => {
+    const aspectRatio = width / height;
+    if (aspectRatio > 1) {
+      return { width: maxSize, height: Math.round(maxSize / aspectRatio) };
+    } else {
+      return { width: Math.round(maxSize * aspectRatio), height: maxSize };
+    }
+  };
+
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Left Sidebar */}
@@ -1170,7 +1228,26 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}
             >
-              <Icon className="w-4 h-4" aria-hidden="true" />
+              {item.id === 'resize' ? (
+                resizePreview.width && resizePreview.height ? (
+                  (() => {
+                    const dims = getAspectRatioPreview(resizePreview.width!, resizePreview.height!, 20);
+                    return (
+                      <div className="w-6 h-6 flex items-center justify-center">
+                        <div className="bg-gray-300 border border-gray-400 rounded" style={{ width: `${dims.width}px`, height: `${dims.height}px` }} />
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 bg-gray-300 rounded" />
+                    <div className="w-4 h-2 bg-gray-300 rounded" />
+                    <div className="w-2 h-4 bg-gray-300 rounded" />
+                  </div>
+                )
+              ) : (
+                <Icon className="w-4 h-4" aria-hidden="true" />
+              )}
               <span className="text-[10px] font-medium">{item.label}</span>
             </button>
           );
@@ -1179,6 +1256,13 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
 
       {/* Side Panel */}
       <div className="w-80 bg-white border-r border-gray-200 overflow-y-auto">
+        {activeSection === 'resize' && (
+          <div className="p-4 flex items-center justify-center">
+            {!resizePreview.width || !resizePreview.height ? (
+              <div className="text-sm text-gray-500">Select a preset to preview shape</div>
+            ) : null}
+          </div>
+        )}
         {activeSection === 'home' && (
           <div className="p-3">
             <div className="flex items-center justify-between mb-2">
@@ -1204,7 +1288,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                   <li>• Add backgrounds to your images</li>
                   <li>• Crop to different aspect ratios</li>
                   <li>• Resize for multiple platforms at once</li>
-                  <li>• Add watermarks to protect your work</li>
+
                 </ul>
               </div>
             </div>
@@ -1233,26 +1317,10 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
           <ResizePanel 
             selectedImages={selectedImages}
             onApplyResize={applyResizeToSelected}
+            onPreviewResize={(w, h) => setResizePreview({ width: w, height: h })}
           />
         )}
 
-
-        {activeSection === 'watermark' && (
-          <div className="p-4">
-            <h2 className="text-lg font-bold text-gray-900 mb-3">Watermark</h2>
-            <div className="space-y-3">
-              <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <Tag className="w-4 h-4 text-gray-600" />
-                  <h3 className="text-sm font-semibold text-gray-900">Coming Soon</h3>
-                </div>
-                <p className="text-xs text-gray-600">
-                  Add text or image watermarks to protect your images.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {activeSection === 'compress' && (
           <CompressPanel selectedImages={selectedImages} />
@@ -1361,6 +1429,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                 onCustomCropCancel={handleCustomCropCancel}
                 onApplyCropToImage={applyCropToImage}
                 onSetImages={setImages}
+                resizePreview={resizePreview}
               />
             ))}
           </div>

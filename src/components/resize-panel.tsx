@@ -5,6 +5,8 @@ import { platformPresets } from './platform-presets';
 
 interface ResizePanelProps {
   selectedImages: Array<{ id: string; file: File; url: string; selected: boolean }>;
+  onApplyResize?: (width: number, height: number) => void;
+  onPreviewResize?: (width: number | null, height: number | null) => void;
 }
 
 interface CustomSize {
@@ -14,8 +16,8 @@ interface CustomSize {
   name: string;
 }
 
-export function ResizePanel({ selectedImages }: ResizePanelProps) {
-  const [selectedPresets, setSelectedPresets] = useState<Set<string>>(new Set());
+export function ResizePanel({ selectedImages, onApplyResize, onPreviewResize }: ResizePanelProps) {
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
   const [customSizes, setCustomSizes] = useState<CustomSize[]>([]);
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [customWidth, setCustomWidth] = useState('');
@@ -25,21 +27,28 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
 
   const togglePreset = (presetId: string) => {
     if (!hasImages) return;
-    
-    const newSelection = new Set(selectedPresets);
 
-    if (newSelection.has(presetId)) {
-      newSelection.delete(presetId);
+    if (selectedPreset === presetId) {
+      setSelectedPreset(null);
+      onPreviewResize?.(null, null);
     } else {
-      newSelection.add(presetId);
+      setSelectedPreset(presetId);
+      const preset = platformPresets.find(p => p.id === presetId);
+      if (preset) {
+        onPreviewResize?.(preset.width, preset.height);
+      }
     }
-
-    setSelectedPresets(newSelection);
   };
 
   const toggleCustomSize = (customId: string) => {
     if (!hasImages) return;
-    setCustomSizes(prev => prev.filter(size => size.id !== customId));
+    const remainingSizes = customSizes.filter(size => size.id !== customId);
+    setCustomSizes(remainingSizes);
+    
+    // If this was the last custom size and no preset selected, clear preview
+    if (remainingSizes.length === 0 && !selectedPreset) {
+      onPreviewResize?.(null, null);
+    }
   };
 
   const addCustomSize = () => {
@@ -56,6 +65,8 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
         name: `Custom (${width}×${height})`
       };
       setCustomSizes(prev => [...prev, newSize]);
+      // Preview the custom size
+      onPreviewResize?.(width, height);
       setCustomWidth('');
       setCustomHeight('');
       setShowCustomInput(false);
@@ -67,13 +78,38 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
       alert('Please select at least one image to resize');
       return;
     }
-    const totalSizes = selectedPresets.size + customSizes.length;
+    const totalSizes = (selectedPreset ? 1 : 0) + customSizes.length;
     if (totalSizes === 0) {
       alert('Please select at least one size to export');
       return;
     }
-    // Would trigger actual export logic
-    alert(`Exporting ${selectedImages.length} image(s) to ${totalSizes} size(s)`);
+    
+    // Apply selected preset if any
+    if (selectedPreset) {
+      const preset = platformPresets.find(p => p.id === selectedPreset);
+      if (preset && onApplyResize) {
+        onApplyResize(preset.width, preset.height);
+      }
+    }
+    
+    // Apply custom sizes
+    customSizes.forEach(customSize => {
+      if (onApplyResize) {
+        onApplyResize(customSize.width, customSize.height);
+      }
+    });
+  };
+  
+  // Helper function to calculate aspect ratio for visual preview
+  const getAspectRatioPreview = (width: number, height: number, maxSize: number = 40) => {
+    const aspectRatio = width / height;
+    if (aspectRatio > 1) {
+      // Landscape
+      return { width: maxSize, height: maxSize / aspectRatio };
+    } else {
+      // Portrait or square
+      return { width: maxSize * aspectRatio, height: maxSize };
+    }
   };
 
   return (
@@ -106,9 +142,9 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
           <div className="flex items-start gap-3">
             <Sparkles className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
             <div>
-              <h3 className="font-semibold text-gray-900 mb-1">Multi-Size Export</h3>
+              <h3 className="font-semibold text-gray-900 mb-1">Smart Resize</h3>
               <p className="text-sm text-gray-700">
-                Select multiple platform sizes and export all at once. AI smart crop runs once!
+                Select a platform size and export optimized images. AI smart crop runs once!
               </p>
             </div>
           </div>
@@ -117,7 +153,7 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
         {/* Platform Size Selection */}
         <div className={cn("space-y-2 mb-4", !hasImages && "opacity-50 pointer-events-none")}>
           {platformPresets.map((preset) => {
-            const isSelected = selectedPresets.has(preset.id);
+            const isSelected = selectedPreset === preset.id;
 
             return (
               <button
@@ -150,6 +186,19 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
                     {preset.width} × {preset.height}
                   </div>
                 </div>
+                {/* Aspect Ratio Shape Preview */}
+                <div className="flex-shrink-0 w-12 h-12 flex items-center justify-center bg-gray-50 rounded border border-gray-200">
+                  <div 
+                    className={cn(
+                      "bg-gray-300 border border-gray-400",
+                      isSelected && "bg-blue-400 border-blue-500"
+                    )}
+                    style={{
+                      width: `${getAspectRatioPreview(preset.width, preset.height).width}px`,
+                      height: `${getAspectRatioPreview(preset.width, preset.height).height}px`,
+                    }}
+                  />
+                </div>
               </button>
             );
           })}
@@ -176,6 +225,16 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
                 <div className="text-xs text-gray-500">
                   {customSize.width} × {customSize.height}
                 </div>
+              </div>
+              {/* Aspect Ratio Shape Preview */}
+              <div className="flex-shrink-0 w-12 h-12 flex items-center justify-center bg-gray-50 rounded border border-gray-200">
+                <div 
+                  className="bg-blue-400 border border-blue-500"
+                  style={{
+                    width: `${getAspectRatioPreview(customSize.width, customSize.height).width}px`,
+                    height: `${getAspectRatioPreview(customSize.width, customSize.height).height}px`,
+                  }}
+                />
               </div>
               <button
                 onClick={() => toggleCustomSize(customSize.id)}
@@ -255,11 +314,11 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
         {/* Export Button */}
         <button
           onClick={handleExport}
-          disabled={selectedImages.length === 0 || (selectedPresets.size === 0 && customSizes.length === 0)}
+          disabled={selectedImages.length === 0 || (!selectedPreset && customSizes.length === 0)}
           className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
         >
           <Download className="w-5 h-5" />
-          Export to {selectedPresets.size + customSizes.length || 0} Size{(selectedPresets.size + customSizes.length) !== 1 ? 's' : ''}
+          Export to {(selectedPreset ? 1 : 0) + customSizes.length || 0} Size{((selectedPreset ? 1 : 0) + customSizes.length) !== 1 ? 's' : ''}
         </button>
 
         {/* Info */}
@@ -269,7 +328,7 @@ export function ResizePanel({ selectedImages }: ResizePanelProps) {
             <li>• AI detects the focal point once</li>
             <li>• Smart crop applied to all selected sizes</li>
             <li>• Download all sizes at once</li>
-            <li>• Select unlimited sizes or create custom dimensions</li>
+            <li>• Select one preset size or create custom dimensions</li>
           </ul>
         </div>
       </div>

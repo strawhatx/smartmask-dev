@@ -40,7 +40,6 @@ const OUTPUT_FORMAT = 'image/png';
 const PRO_FEATURES = [
   'Batch process unlimited images',
   'HD quality downloads',
-  'No watermarks',
   'Ad-free experience',
   'Priority support',
 ] as const;

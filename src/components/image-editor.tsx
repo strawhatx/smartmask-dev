@@ -387,7 +387,7 @@ export function ImageEditor({ imageUrl, preset, imageName, isPro, onBack }: Imag
                 <canvas
                   ref={canvasRef}
                   className="max-w-full max-h-[600px] shadow-xl rounded"
-                  style={{ imageRendering: 'high-quality' }}
+                  style={{ imageRendering: 'smooth' }}
                 />
               </div>
               <div className="mt-4 text-center text-sm text-gray-500">

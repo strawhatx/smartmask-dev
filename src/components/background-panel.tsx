@@ -312,7 +312,7 @@ export function BackgroundPanel({ selectedCount, onApplyBackground }: Background
                   <img
                     src={bg.thumbnail}
                     alt={bg.name}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-fill"
                   />
                 </button>
               ))}
@@ -343,7 +343,7 @@ export function BackgroundPanel({ selectedCount, onApplyBackground }: Background
                   <img
                     src={bg.thumbnail}
                     alt={bg.name}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-fill"
                   />
                 </button>
               ))}
@@ -381,7 +381,7 @@ export function BackgroundPanel({ selectedCount, onApplyBackground }: Background
                   <img
                     src={bg.thumbnail}
                     alt={bg.name}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-fill"
                   />
                 </button>
               ))}
