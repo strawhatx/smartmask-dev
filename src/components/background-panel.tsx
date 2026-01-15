@@ -4,6 +4,7 @@ import { ChevronLeft, Eraser, Palette, Image as ImageIcon, Sparkles } from 'luci
 
 interface BackgroundPanelProps {
   selectedCount: number;
+  selectedImages: Array<{ id: string; url: string; background?: string; backgroundType?: 'blur' | 'color' | 'texture' | 'transparent' }>;
   onApplyBackground: (background: string, type: 'blur' | 'color' | 'texture' | 'transparent') => void | Promise<void>;
 }
 
@@ -124,7 +125,7 @@ const solidColors = [
   { id: 'green', name: 'Green', value: '#10B981' },
 ];
 
-export function BackgroundPanel({ selectedCount, onApplyBackground }: BackgroundPanelProps) {
+export function BackgroundPanel({ selectedCount, selectedImages, onApplyBackground }: BackgroundPanelProps) {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [customColor, setCustomColor] = useState('#FFFFFF');
 
@@ -172,6 +173,66 @@ export function BackgroundPanel({ selectedCount, onApplyBackground }: Background
             <p className="text-sm text-yellow-800">
               Select one or more images to apply backgrounds
             </p>
+          </div>
+        )}
+
+        {/* Live Preview */}
+        {selectedCount > 0 && selectedImages.length > 0 && (
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Live Preview</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {selectedImages.slice(0, 4).map((img) => {
+                const getBackgroundStyle = () => {
+                  if (!img.backgroundType) return undefined;
+                  switch (img.backgroundType) {
+                    case 'transparent':
+                      return {
+                        backgroundImage: 'linear-gradient(45deg, #f0f0f0 25%, transparent 25%), linear-gradient(-45deg, #f0f0f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f0f0f0 75%), linear-gradient(-45deg, transparent 75%, #f0f0f0 75%)',
+                        backgroundSize: '20px 20px',
+                        backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px'
+                      };
+                    case 'color':
+                      return { backgroundColor: img.background || '#E5E7EB' };
+                    case 'texture':
+                      return {
+                        backgroundImage: `url(${img.background})`,
+                        backgroundSize: '50%',
+                        backgroundPosition: 'center',
+                        backgroundRepeat: 'no-repeat'
+                      };
+                    case 'blur':
+                      return {
+                        backgroundImage: `url(${img.url})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        filter: 'blur(20px)',
+                        transform: 'scale(1.1)'
+                      };
+                    default:
+                      return undefined;
+                  }
+                };
+                return (
+                  <div key={img.id} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-white">
+                    {img.backgroundType && (
+                      <div
+                        className="absolute inset-0"
+                        style={getBackgroundStyle()}
+                      />
+                    )}
+                    <img
+                      src={img.url}
+                      alt="Preview"
+                      className="relative z-10 w-full h-full object-contain"
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '100%'
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

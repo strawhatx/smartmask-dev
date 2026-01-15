@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { ChevronLeft, Download, Info } from 'lucide-react';
 
 interface CompressPanelProps {
-  selectedImages: Array<{ id: string; file: File; url: string; selected: boolean }>;
+  selectedImages: Array<{ id: string; file: File; url: string; selected: boolean; isUpscaled?: boolean }>;
   onApplyCompress?: (mode: 'quality' | 'size' | 'custom', quality?: number, targetSizeKB?: number, outputFormat?: 'original' | 'webp') => void;
 }
 
@@ -79,9 +79,16 @@ export function CompressPanel({ selectedImages, onApplyCompress }: CompressPanel
     };
   }, [imageDimensions, mode, quality, targetSizeKB, outputFormat, selectedImages.length]);
 
+  const hasUpscaledImages = selectedImages.some(img => img.isUpscaled);
+
   const handleCompress = () => {
     if (selectedImages.length === 0) {
       alert('Please select at least one image to compress');
+      return;
+    }
+    
+    if (hasUpscaledImages) {
+      alert('Cannot compress upscaled images. Please deselect upscaled images first.');
       return;
     }
     
@@ -116,6 +123,16 @@ export function CompressPanel({ selectedImages, onApplyCompress }: CompressPanel
           <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <p className="text-sm text-yellow-800">
               Select one or more images to compress
+            </p>
+          </div>
+        )}
+
+        {/* Warning if images are upscaled */}
+        {selectedImages.length > 0 && selectedImages.some(img => img.isUpscaled) && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-800 font-medium mb-1">Cannot compress upscaled images</p>
+            <p className="text-xs text-red-700">
+              Some selected images have been upscaled. Please deselect upscaled images or upscale different images. Compression and upscaling are mutually exclusive.
             </p>
           </div>
         )}
@@ -273,7 +290,7 @@ export function CompressPanel({ selectedImages, onApplyCompress }: CompressPanel
         {/* Compress Button */}
         <button
           onClick={handleCompress}
-          disabled={selectedImages.length === 0}
+          disabled={selectedImages.length === 0 || hasUpscaledImages}
           className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-semibold rounded-lg hover:from-green-700 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
         >
           <Download className="w-5 h-5" />

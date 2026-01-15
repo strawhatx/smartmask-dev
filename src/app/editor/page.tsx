@@ -48,6 +48,9 @@ export interface UploadedImage {
   originalHeight?: number;
   resizeWidth?: number;
   resizeHeight?: number;
+  convertedFormat?: ImageFormat;
+  isCompressed?: boolean;
+  isUpscaled?: boolean;
 }
 
 interface EditorWorkspaceProps {
@@ -358,6 +361,27 @@ function ImageItem({
             />
           )}
         </div>
+
+        {/* Format and Compression Tags */}
+        {!image.isCustomCropActive && (
+          <div className="absolute top-2 left-2 flex flex-col gap-1.5 z-30">
+            {image.convertedFormat && (
+              <div className="px-2 py-0.5 bg-blue-600 text-white text-[10px] font-semibold rounded-md uppercase">
+                {image.convertedFormat}
+              </div>
+            )}
+            {image.isCompressed && (
+              <div className="px-2 py-0.5 bg-green-600 text-white text-[10px] font-semibold rounded-md">
+                Compressed
+              </div>
+            )}
+            {image.isUpscaled && (
+              <div className="px-2 py-0.5 bg-purple-600 text-white text-[10px] font-semibold rounded-md">
+                Upscaled
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Selection Checkbox */}
         {!image.isCustomCropActive && (
@@ -1248,7 +1272,9 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                         url: processedDataURL,
                         processedUrl: undefined,
                         isProcessing: false,
-                        error: undefined
+                        error: undefined,
+                        isCompressed: true,
+                        isUpscaled: false // Clear upscale when compressing
                       } 
                     : img
                 );
@@ -1336,7 +1362,8 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                         url: processedDataURL,
                         processedUrl: undefined,
                         isProcessing: false,
-                        error: undefined
+                        error: undefined,
+                        convertedFormat: format
                       } 
                     : img
                 );
@@ -1425,7 +1452,9 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                         url: processedDataURL,
                         processedUrl: undefined,
                         isProcessing: false,
-                        error: undefined
+                        error: undefined,
+                        isUpscaled: true,
+                        isCompressed: false // Clear compression when upscaling
                       } 
                     : img
                 );
@@ -1564,6 +1593,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
         {activeSection === 'background' && (
           <BackgroundPanel 
             selectedCount={selectedCount}
+            selectedImages={selectedImages}
             onApplyBackground={applyBackgroundToSelected}
           />
         )}

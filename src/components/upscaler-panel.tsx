@@ -4,7 +4,7 @@ import { ChevronLeft, Download, Sparkles, Info, Zap, Crown } from 'lucide-react'
 import { UpscaleLevel } from '@/lib/imageProcessor';
 
 interface UpscalerPanelProps {
-  selectedImages: Array<{ id: string; file: File; url: string; selected: boolean }>;
+  selectedImages: Array<{ id: string; file: File; url: string; selected: boolean; isCompressed?: boolean }>;
   onApplyUpscale?: (level: UpscaleLevel, enhanceDetails?: boolean, removeNoise?: boolean, sharpenEdges?: boolean) => void;
 }
 
@@ -39,15 +39,80 @@ const upscaleOptions: UpscaleOption[] = [
   }
 ];
 
-export function UpscalerPanel({ selectedImages }: UpscalerPanelProps) {
+export function UpscalerPanel({ selectedImages, onApplyUpscale }: UpscalerPanelProps) {
   const [selectedLevel, setSelectedLevel] = useState<UpscaleLevel>('2x');
   const [enhanceDetails, setEnhanceDetails] = useState(true);
   const [removeNoise, setRemoveNoise] = useState(true);
   const [sharpenEdges, setSharpenEdges] = useState(false);
+  const [imageDimensions, setImageDimensions] = useState<Array<{ width: number; height: number }>>([]);
+
+  // Load image dimensions
+  useEffect(() => {
+    const loadDimensions = async () => {
+      const dims = await Promise.all(
+        selectedImages.map(img => 
+          new Promise<{ width: number; height: number }>((resolve) => {
+            const image = new Image();
+            image.onload = () => {
+              resolve({
+                width: image.width,
+                height: image.height
+              });
+            };
+            image.onerror = () => resolve({ width: 0, height: 0 });
+            image.src = img.url;
+          })
+        )
+      );
+      setImageDimensions(dims);
+    };
+
+    if (selectedImages.length > 0) {
+      loadDimensions();
+    } else {
+      setImageDimensions([]);
+    }
+  }, [selectedImages]);
+
+  // Calculate upscaled dimensions
+  const upscalePreview = useMemo(() => {
+    if (imageDimensions.length === 0) return null;
+
+    const multiplier = parseInt(selectedLevel);
+    const firstImage = imageDimensions[0];
+    
+    // If all images have same dimensions, show single preview
+    const allSame = imageDimensions.every(dim => 
+      dim.width === firstImage.width && dim.height === firstImage.height
+    );
+
+    if (allSame) {
+      return {
+        original: `${firstImage.width} × ${firstImage.height} px`,
+        upscaled: `${firstImage.width * multiplier} × ${firstImage.height * multiplier} px`,
+        multiplier: `${multiplier}×`
+      };
+    } else {
+      // Show range or first image
+      return {
+        original: `${firstImage.width} × ${firstImage.height} px`,
+        upscaled: `${firstImage.width * multiplier} × ${firstImage.height * multiplier} px`,
+        multiplier: `${multiplier}×`,
+        multiple: true
+      };
+    }
+  }, [imageDimensions, selectedLevel]);
+
+  const hasCompressedImages = selectedImages.some(img => img.isCompressed);
 
   const handleUpscale = () => {
     if (selectedImages.length === 0) {
       alert('Please select at least one image to upscale');
+      return;
+    }
+    
+    if (hasCompressedImages) {
+      alert('Cannot upscale compressed images. Please deselect compressed images first.');
       return;
     }
     
@@ -77,6 +142,16 @@ export function UpscalerPanel({ selectedImages }: UpscalerPanelProps) {
           <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <p className="text-sm text-yellow-800">
               Select one or more images to upscale
+            </p>
+          </div>
+        )}
+
+        {/* Warning if images are compressed */}
+        {selectedImages.length > 0 && selectedImages.some(img => img.isCompressed) && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-800 font-medium mb-1">Cannot upscale compressed images</p>
+            <p className="text-xs text-red-700">
+              Some selected images have been compressed. Please deselect compressed images or compress different images. Compression and upscaling are mutually exclusive.
             </p>
           </div>
         )}
@@ -226,7 +301,7 @@ export function UpscalerPanel({ selectedImages }: UpscalerPanelProps) {
         {/* Upscale Button */}
         <button
           onClick={handleUpscale}
-          disabled={selectedImages.length === 0}
+          disabled={selectedImages.length === 0 || hasCompressedImages}
           className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-pink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
         >
           <Sparkles className="w-5 h-5" />
