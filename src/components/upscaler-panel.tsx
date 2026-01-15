@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { ChevronLeft, Download, Sparkles, Info, Zap, Crown } from 'lucide-react';
+import { UpscaleLevel } from '@/lib/imageProcessor';
 
 interface UpscalerPanelProps {
   selectedImages: Array<{ id: string; file: File; url: string; selected: boolean }>;
+  onApplyUpscale?: (level: UpscaleLevel, enhanceDetails?: boolean, removeNoise?: boolean, sharpenEdges?: boolean) => void;
 }
-
-type UpscaleLevel = '2x' | '4x' | '8x';
 
 interface UpscaleOption {
   id: UpscaleLevel;
@@ -51,8 +51,9 @@ export function UpscalerPanel({ selectedImages }: UpscalerPanelProps) {
       return;
     }
     
-    const option = upscaleOptions.find(o => o.id === selectedLevel);
-    alert(`Upscaling ${selectedImages.length} image(s) to ${option?.multiplier} resolution`);
+    if (onApplyUpscale) {
+      onApplyUpscale(selectedLevel, enhanceDetails, removeNoise, sharpenEdges);
+    }
   };
 
   return (
@@ -196,20 +197,26 @@ export function UpscalerPanel({ selectedImages }: UpscalerPanelProps) {
         </div>
 
         {/* Resolution Preview */}
-        {selectedImages.length > 0 && (
+        {upscalePreview && selectedImages.length > 0 && (
           <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-start gap-3">
-              <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+              <Info className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <h4 className="text-sm font-semibold text-blue-900 mb-2">Resolution Preview</h4>
                 <div className="space-y-1 text-sm text-blue-700">
-                  <p>Original: 1920 × 1080 px</p>
-                  <p className="font-semibold">
-                    Upscaled ({upscaleOptions.find(o => o.id === selectedLevel)?.multiplier}): 
-                    {selectedLevel === '2x' && ' 3840 × 2160 px'}
-                    {selectedLevel === '4x' && ' 7680 × 4320 px'}
-                    {selectedLevel === '8x' && ' 15360 × 8640 px'}
-                  </p>
+                  <div className="flex justify-between">
+                    <span>Original:</span>
+                    <span className="font-medium">{upscalePreview.original}</span>
+                  </div>
+                  <div className="flex justify-between pt-1 border-t border-blue-200">
+                    <span className="font-semibold">Upscaled ({upscalePreview.multiplier}):</span>
+                    <span className="font-bold text-blue-900">{upscalePreview.upscaled}</span>
+                  </div>
+                  {upscalePreview.multiple && selectedImages.length > 1 && (
+                    <p className="text-xs text-blue-600 pt-1">
+                      Showing preview for first image. {selectedImages.length - 1} more image{selectedImages.length - 1 !== 1 ? 's' : ''} will be upscaled.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

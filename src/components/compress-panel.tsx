@@ -1,17 +1,83 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { ChevronLeft, Download, Info } from 'lucide-react';
 
 interface CompressPanelProps {
   selectedImages: Array<{ id: string; file: File; url: string; selected: boolean }>;
+  onApplyCompress?: (mode: 'quality' | 'size' | 'custom', quality?: number, targetSizeKB?: number, outputFormat?: 'original' | 'webp') => void;
 }
 
 type CompressionMode = 'quality' | 'size' | 'custom';
 
-export function CompressPanel({ selectedImages }: CompressPanelProps) {
+export function CompressPanel({ selectedImages, onApplyCompress }: CompressPanelProps) {
   const [mode, setMode] = useState<CompressionMode>('quality');
   const [quality, setQuality] = useState(80);
   const [targetSizeKB, setTargetSizeKB] = useState(500);
+  const [outputFormat, setOutputFormat] = useState<'original' | 'webp'>('original');
+  const [imageDimensions, setImageDimensions] = useState<Array<{ width: number; height: number; size: number }>>([]);
+
+  // Load image dimensions
+  useEffect(() => {
+    const loadDimensions = async () => {
+      const dims = await Promise.all(
+        selectedImages.map(img => 
+          new Promise<{ width: number; height: number; size: number }>((resolve) => {
+            const image = new Image();
+            image.onload = () => {
+              resolve({
+                width: image.width,
+                height: image.height,
+                size: img.file.size
+              });
+            };
+            image.onerror = () => resolve({ width: 0, height: 0, size: img.file.size });
+            image.src = img.url;
+          })
+        )
+      );
+      setImageDimensions(dims);
+    };
+
+    if (selectedImages.length > 0) {
+      loadDimensions();
+    } else {
+      setImageDimensions([]);
+    }
+  }, [selectedImages]);
+
+  // Calculate estimated compression
+  const compressionPreview = useMemo(() => {
+    if (imageDimensions.length === 0) return null;
+
+    const totalOriginalSize = imageDimensions.reduce((sum, dim) => sum + dim.size, 0);
+    
+    let estimatedSize: number;
+    if (mode === 'size' && targetSizeKB) {
+      estimatedSize = targetSizeKB * 1024 * selectedImages.length;
+    } else if (mode === 'custom' && quality !== undefined) {
+      // Estimate based on quality (lower quality = smaller size)
+      const compressionRatio = quality / 100;
+      estimatedSize = totalOriginalSize * (0.3 + (1 - compressionRatio) * 0.5);
+    } else if (mode === 'quality') {
+      // High quality mode: 30-50% reduction
+      estimatedSize = totalOriginalSize * 0.6;
+    } else {
+      estimatedSize = totalOriginalSize * 0.6;
+    }
+
+    // WebP typically offers 25-35% better compression
+    if (outputFormat === 'webp') {
+      estimatedSize = estimatedSize * 0.7;
+    }
+
+    const reduction = ((totalOriginalSize - estimatedSize) / totalOriginalSize) * 100;
+    
+    return {
+      originalSize: totalOriginalSize,
+      estimatedSize: Math.round(estimatedSize),
+      reduction: Math.round(reduction)
+    };
+  }, [imageDimensions, mode, quality, targetSizeKB, outputFormat, selectedImages.length]);
 
   const handleCompress = () => {
     if (selectedImages.length === 0) {
@@ -19,7 +85,14 @@ export function CompressPanel({ selectedImages }: CompressPanelProps) {
       return;
     }
     
-    alert(`Compressing ${selectedImages.length} image(s) with ${mode} mode`);
+    if (onApplyCompress) {
+      onApplyCompress(
+        mode,
+        mode === 'custom' ? quality : undefined,
+        mode === 'size' ? targetSizeKB : undefined,
+        outputFormat
+      );
+    }
   };
 
   return (
@@ -169,10 +242,26 @@ export function CompressPanel({ selectedImages }: CompressPanelProps) {
         <div className="mb-6">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Output Format</h3>
           <div className="grid grid-cols-2 gap-2">
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium">
+            <button 
+              onClick={() => setOutputFormat('original')}
+              className={cn(
+                "px-4 py-2 rounded-lg font-medium transition-colors",
+                outputFormat === 'original'
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              )}
+            >
               Keep Original
             </button>
-            <button className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200">
+            <button 
+              onClick={() => setOutputFormat('webp')}
+              className={cn(
+                "px-4 py-2 rounded-lg font-medium transition-colors",
+                outputFormat === 'webp'
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              )}
+            >
               Convert to WebP
             </button>
           </div>
@@ -192,13 +281,30 @@ export function CompressPanel({ selectedImages }: CompressPanelProps) {
           {selectedImages.length !== 1 ? 's' : ''}
         </button>
 
-        {/* Estimated Savings */}
-        {selectedImages.length > 0 && (
+        {/* Compression Preview */}
+        {compressionPreview && selectedImages.length > 0 && (
           <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-            <h4 className="text-sm font-semibold text-green-900 mb-1">Estimated Savings</h4>
-            <p className="text-sm text-green-700">
-              ~{mode === 'quality' ? '30-50' : mode === 'size' ? '50-70' : '40-60'}% file size reduction
-            </p>
+            <h4 className="text-sm font-semibold text-green-900 mb-2">Compression Preview</h4>
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-green-700">Original Size:</span>
+                <span className="font-semibold text-green-900">
+                  {(compressionPreview.originalSize / 1024).toFixed(1)} KB
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-green-700">Estimated Size:</span>
+                <span className="font-semibold text-green-900">
+                  {(compressionPreview.estimatedSize / 1024).toFixed(1)} KB
+                </span>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-green-200">
+                <span className="text-green-700 font-medium">Size Reduction:</span>
+                <span className="font-bold text-green-900">
+                  {compressionPreview.reduction}% ({((compressionPreview.originalSize - compressionPreview.estimatedSize) / 1024).toFixed(1)} KB saved)
+                </span>
+              </div>
+            </div>
           </div>
         )}
       </div>

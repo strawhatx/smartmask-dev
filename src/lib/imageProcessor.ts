@@ -348,3 +348,275 @@ export async function flipImage(
     img.src = URL.createObjectURL(imageFile);
   });
 }
+
+export interface CompressOptions {
+  quality?: number; // 0-1 for quality mode
+  targetSizeKB?: number; // Target file size in KB for size mode
+  mode: 'quality' | 'size' | 'custom';
+  outputFormat?: 'original' | 'webp';
+}
+
+export async function compressImage(
+  imageFile: File,
+  options: CompressOptions
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        // Determine output format
+        let mimeType: string;
+        let quality: number = 0.8;
+
+        if (options.outputFormat === 'webp') {
+          mimeType = 'image/webp';
+          quality = options.quality ?? 0.8;
+        } else {
+          // Keep original format
+          mimeType = imageFile.type || 'image/jpeg';
+          
+          if (options.mode === 'quality') {
+            quality = 0.7; // High quality compression
+          } else if (options.mode === 'custom' && options.quality !== undefined) {
+            quality = options.quality / 100;
+          } else {
+            quality = 0.6; // Default compression
+          }
+        }
+
+        // For target size mode, binary search for quality
+        if (options.mode === 'size' && options.targetSizeKB) {
+          findQualityForTargetSize(canvas, mimeType, options.targetSizeKB * 1024)
+            .then(quality => {
+              canvas.toBlob(
+                (blob) => {
+                  if (blob) {
+                    resolve(blob);
+                  } else {
+                    reject(new Error('Failed to create blob'));
+                  }
+                },
+                mimeType,
+                quality
+              );
+            })
+            .catch(reject);
+          return;
+        }
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create blob'));
+            }
+          },
+          mimeType,
+          quality
+        );
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = URL.createObjectURL(imageFile);
+  });
+}
+
+async function findQualityForTargetSize(
+  canvas: HTMLCanvasElement,
+  mimeType: string,
+  targetSizeBytes: number
+): Promise<number> {
+  let minQuality = 0.1;
+  let maxQuality = 1.0;
+  let quality = 0.5;
+
+  for (let i = 0; i < 10; i++) {
+    quality = (minQuality + maxQuality) / 2;
+    
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, mimeType, quality);
+    });
+
+    if (!blob) {
+      return 0.8;
+    }
+
+    if (blob.size <= targetSizeBytes) {
+      minQuality = quality;
+    } else {
+      maxQuality = quality;
+    }
+  }
+
+  return quality;
+}
+
+export type ImageFormat = 'jpg' | 'png' | 'webp' | 'gif' | 'bmp' | 'tiff';
+
+export interface ConvertOptions {
+  format: ImageFormat;
+  maintainQuality?: boolean;
+}
+
+export async function convertImage(
+  imageFile: File,
+  options: ConvertOptions
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        // Map format to MIME type
+        const formatMap: Record<ImageFormat, string> = {
+          jpg: 'image/jpeg',
+          png: 'image/png',
+          webp: 'image/webp',
+          gif: 'image/gif',
+          bmp: 'image/bmp',
+          tiff: 'image/tiff'
+        };
+
+        const mimeType = formatMap[options.format];
+        const quality = options.maintainQuality ? 0.95 : 0.85;
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create blob'));
+            }
+          },
+          mimeType,
+          quality
+        );
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = URL.createObjectURL(imageFile);
+  });
+}
+
+export type UpscaleLevel = '2x' | '4x' | '8x';
+
+export interface UpscaleOptions {
+  level: UpscaleLevel;
+  enhanceDetails?: boolean;
+  removeNoise?: boolean;
+  sharpenEdges?: boolean;
+}
+
+export async function upscaleImage(
+  imageFile: File,
+  options: UpscaleOptions
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+
+        // Calculate new dimensions
+        const multiplier = parseInt(options.level);
+        const newWidth = img.width * multiplier;
+        const newHeight = img.height * multiplier;
+
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+
+        // Use imageSmoothingEnabled for better quality
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
+        // Draw scaled image
+        ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+        // Apply enhancements if requested
+        if (options.enhanceDetails || options.removeNoise || options.sharpenEdges) {
+          const imageData = ctx.getImageData(0, 0, newWidth, newHeight);
+          const data = imageData.data;
+
+          // Simple enhancement: slight contrast and sharpening
+          for (let i = 0; i < data.length; i += 4) {
+            if (options.enhanceDetails) {
+              // Slight contrast boost
+              data[i] = Math.min(255, data[i] * 1.05);     // R
+              data[i + 1] = Math.min(255, data[i + 1] * 1.05); // G
+              data[i + 2] = Math.min(255, data[i + 2] * 1.05); // B
+            }
+            
+            if (options.removeNoise) {
+              // Simple noise reduction (would need more sophisticated algorithm in production)
+              const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+              if (Math.abs(data[i] - avg) < 10) {
+                data[i] = avg;
+                data[i + 1] = avg;
+                data[i + 2] = avg;
+              }
+            }
+          }
+
+          ctx.putImageData(imageData, 0, 0);
+        }
+
+        // Convert to blob
+        const format = imageFile.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const quality = 0.95;
+        
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create blob'));
+            }
+          },
+          format,
+          quality
+        );
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = URL.createObjectURL(imageFile);
+  });
+}

@@ -14,7 +14,7 @@ import { CompressPanel } from '@/components/compress-panel';
 import { ConvertPanel } from '@/components/convert-panel';
 import { UpscalerPanel } from '@/components/upscaler-panel';
 import { removeImageBackground, blobToDataURL } from '@/lib/backgroundRemoval';
-import { cropImage, rotateImage, flipImage, CropArea } from '@/lib/imageProcessor';
+import { cropImage, rotateImage, flipImage, compressImage, convertImage, upscaleImage, CropArea, ImageFormat, UpscaleLevel } from '@/lib/imageProcessor';
 import { CropOverlay, CropOverlayHandle } from '@/components/crop-overlay';
 import { CropPreviewOverlay } from '@/components/crop-preview-overlay';
 
@@ -1190,6 +1190,272 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
     });
   }, [selectedImages]);
 
+  const applyCompressToSelected = useCallback(async (
+    mode: 'quality' | 'size' | 'custom',
+    quality?: number,
+    targetSizeKB?: number,
+    outputFormat?: 'original' | 'webp'
+  ) => {
+    if (selectedImages.length === 0) return;
+
+    setImages(prev => {
+      const selectedIds = prev.filter(img => img.selected).map(img => img.id);
+      
+      selectedIds.forEach(async (imageId) => {
+        setImages(current => {
+          const image = current.find(img => img.id === imageId);
+          if (!image) return current;
+
+          (async () => {
+            try {
+              setImages(prevState => {
+                const currentImage = prevState.find(img => img.id === imageId);
+                if (!currentImage) return prevState;
+                return prevState.map(img => 
+                  img.id === imageId 
+                    ? { ...img, isProcessing: true, error: undefined } 
+                    : img
+                );
+              });
+
+              const processedBlob = await compressImage(image.file, {
+                mode,
+                quality,
+                targetSizeKB,
+                outputFormat
+              });
+              const processedDataURL = await blobToDataURL(processedBlob);
+              
+              const processedFile = new File(
+                [processedBlob], 
+                image.file.name, 
+                { type: processedBlob.type }
+              );
+              
+              setImages(prevState => {
+                const currentImage = prevState.find(img => img.id === imageId);
+                if (!currentImage) return prevState;
+
+                if (currentImage.url.startsWith('blob:')) {
+                  URL.revokeObjectURL(currentImage.url);
+                }
+
+                return prevState.map(img => 
+                  img.id === imageId 
+                    ? { 
+                        ...img, 
+                        file: processedFile,
+                        url: processedDataURL,
+                        processedUrl: undefined,
+                        isProcessing: false,
+                        error: undefined
+                      } 
+                    : img
+                );
+              });
+            } catch (error) {
+              console.error('Failed to compress image:', error);
+              const errorMessage = error instanceof Error ? error.message : 'Failed to compress image';
+              
+              setImages(prevState => prevState.map(img => 
+                img.id === imageId 
+                  ? { 
+                      ...img, 
+                      isProcessing: false,
+                      error: errorMessage
+                    } 
+                  : img
+              ));
+            }
+          })();
+
+          return current;
+        });
+      });
+
+      return prev.map(img => 
+        img.selected ? { ...img, isProcessing: true, error: undefined } : img
+      );
+    });
+  }, [selectedImages]);
+
+  const applyConvertToSelected = useCallback(async (
+    format: ImageFormat,
+    maintainQuality?: boolean
+  ) => {
+    if (selectedImages.length === 0) return;
+
+    setImages(prev => {
+      const selectedIds = prev.filter(img => img.selected).map(img => img.id);
+      
+      selectedIds.forEach(async (imageId) => {
+        setImages(current => {
+          const image = current.find(img => img.id === imageId);
+          if (!image) return current;
+
+          (async () => {
+            try {
+              setImages(prevState => {
+                const currentImage = prevState.find(img => img.id === imageId);
+                if (!currentImage) return prevState;
+                return prevState.map(img => 
+                  img.id === imageId 
+                    ? { ...img, isProcessing: true, error: undefined } 
+                    : img
+                );
+              });
+
+              const processedBlob = await convertImage(image.file, {
+                format,
+                maintainQuality
+              });
+              const processedDataURL = await blobToDataURL(processedBlob);
+              
+              const extension = format === 'jpg' ? '.jpg' : format === 'png' ? '.png' : format === 'webp' ? '.webp' : format === 'gif' ? '.gif' : format === 'bmp' ? '.bmp' : '.tiff';
+              const newFileName = image.file.name.replace(/\.[^/.]+$/, '') + extension;
+              
+              const processedFile = new File(
+                [processedBlob], 
+                newFileName, 
+                { type: processedBlob.type }
+              );
+              
+              setImages(prevState => {
+                const currentImage = prevState.find(img => img.id === imageId);
+                if (!currentImage) return prevState;
+
+                if (currentImage.url.startsWith('blob:')) {
+                  URL.revokeObjectURL(currentImage.url);
+                }
+
+                return prevState.map(img => 
+                  img.id === imageId 
+                    ? { 
+                        ...img, 
+                        file: processedFile,
+                        url: processedDataURL,
+                        processedUrl: undefined,
+                        isProcessing: false,
+                        error: undefined
+                      } 
+                    : img
+                );
+              });
+            } catch (error) {
+              console.error('Failed to convert image:', error);
+              const errorMessage = error instanceof Error ? error.message : 'Failed to convert image';
+              
+              setImages(prevState => prevState.map(img => 
+                img.id === imageId 
+                  ? { 
+                      ...img, 
+                      isProcessing: false,
+                      error: errorMessage
+                    } 
+                  : img
+              ));
+            }
+          })();
+
+          return current;
+        });
+      });
+
+      return prev.map(img => 
+        img.selected ? { ...img, isProcessing: true, error: undefined } : img
+      );
+    });
+  }, [selectedImages]);
+
+  const applyUpscaleToSelected = useCallback(async (
+    level: UpscaleLevel,
+    enhanceDetails?: boolean,
+    removeNoise?: boolean,
+    sharpenEdges?: boolean
+  ) => {
+    if (selectedImages.length === 0) return;
+
+    setImages(prev => {
+      const selectedIds = prev.filter(img => img.selected).map(img => img.id);
+      
+      selectedIds.forEach(async (imageId) => {
+        setImages(current => {
+          const image = current.find(img => img.id === imageId);
+          if (!image) return current;
+
+          (async () => {
+            try {
+              setImages(prevState => {
+                const currentImage = prevState.find(img => img.id === imageId);
+                if (!currentImage) return prevState;
+                return prevState.map(img => 
+                  img.id === imageId 
+                    ? { ...img, isProcessing: true, error: undefined } 
+                    : img
+                );
+              });
+
+              const processedBlob = await upscaleImage(image.file, {
+                level,
+                enhanceDetails,
+                removeNoise,
+                sharpenEdges
+              });
+              const processedDataURL = await blobToDataURL(processedBlob);
+              
+              const processedFile = new File(
+                [processedBlob], 
+                image.file.name, 
+                { type: processedBlob.type }
+              );
+              
+              setImages(prevState => {
+                const currentImage = prevState.find(img => img.id === imageId);
+                if (!currentImage) return prevState;
+
+                if (currentImage.url.startsWith('blob:')) {
+                  URL.revokeObjectURL(currentImage.url);
+                }
+
+                return prevState.map(img => 
+                  img.id === imageId 
+                    ? { 
+                        ...img, 
+                        file: processedFile,
+                        url: processedDataURL,
+                        processedUrl: undefined,
+                        isProcessing: false,
+                        error: undefined
+                      } 
+                    : img
+                );
+              });
+            } catch (error) {
+              console.error('Failed to upscale image:', error);
+              const errorMessage = error instanceof Error ? error.message : 'Failed to upscale image';
+              
+              setImages(prevState => prevState.map(img => 
+                img.id === imageId 
+                  ? { 
+                      ...img, 
+                      isProcessing: false,
+                      error: errorMessage
+                    } 
+                  : img
+              ));
+            }
+          })();
+
+          return current;
+        });
+      });
+
+      return prev.map(img => 
+        img.selected ? { ...img, isProcessing: true, error: undefined } : img
+      );
+    });
+  }, [selectedImages]);
+
   // Sidebar navigation handler
   const handleSectionChange = useCallback((section: SidebarSection) => {
     setActiveSection(section);
@@ -1323,15 +1589,24 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
 
 
         {activeSection === 'compress' && (
-          <CompressPanel selectedImages={selectedImages} />
+          <CompressPanel 
+            selectedImages={selectedImages}
+            onApplyCompress={applyCompressToSelected}
+          />
         )}
 
         {activeSection === 'convert' && (
-          <ConvertPanel selectedImages={selectedImages} />
+          <ConvertPanel 
+            selectedImages={selectedImages}
+            onApplyConvert={applyConvertToSelected}
+          />
         )}
 
         {activeSection === 'upscaler' && (
-          <UpscalerPanel selectedImages={selectedImages} />
+          <UpscalerPanel 
+            selectedImages={selectedImages}
+            onApplyUpscale={applyUpscaleToSelected}
+          />
         )}
       </div>
 

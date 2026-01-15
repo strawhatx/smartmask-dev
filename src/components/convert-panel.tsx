@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { ChevronLeft, Download, FileImage, Info } from 'lucide-react';
+import { ImageFormat } from '@/lib/imageProcessor';
 
 interface ConvertPanelProps {
   selectedImages: Array<{ id: string; file: File; url: string; selected: boolean }>;
+  onApplyConvert?: (format: ImageFormat, maintainQuality?: boolean) => void;
 }
-
-type ImageFormat = 'jpg' | 'png' | 'webp' | 'gif' | 'bmp' | 'tiff';
 
 interface FormatOption {
   id: ImageFormat;
@@ -67,8 +67,9 @@ export function ConvertPanel({ selectedImages }: ConvertPanelProps) {
       return;
     }
     
-    const format = formats.find(f => f.id === selectedFormat);
-    alert(`Converting ${selectedImages.length} image(s) to ${format?.name}`);
+    if (onApplyConvert) {
+      onApplyConvert(selectedFormat, maintainQuality);
+    }
   };
 
   return (
