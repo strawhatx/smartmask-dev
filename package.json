@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/strawhatx/smartmask-dev#readme",
   "dependencies": {
+    "@imgly/background-removal": "^1.7.0",
     "@radix-ui/react-slider": "^1.3.6",
     "@radix-ui/react-switch": "^1.2.6",
     "class-variance-authority": "^0.7.1",
