@@ -57,7 +57,7 @@ const formats: FormatOption[] = [
   }
 ];
 
-export function ConvertPanel({ selectedImages }: ConvertPanelProps) {
+export function ConvertPanel({ selectedImages, onApplyConvert }: ConvertPanelProps) {
   const [selectedFormat, setSelectedFormat] = useState<ImageFormat>('jpg');
   const [maintainQuality, setMaintainQuality] = useState(true);
 
