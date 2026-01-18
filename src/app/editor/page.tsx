@@ -15,7 +15,7 @@ import { ConvertPanel } from '@/components/convert-panel';
 import { UpscalerPanel } from '@/components/upscaler-panel';
 import { removeImageBackground, blobToDataURL } from '@/lib/backgroundRemoval';
 import { cropImage, rotateImage, flipImage, compressImage, convertImage, upscaleImage, CropArea, ImageFormat, UpscaleLevel } from '@/lib/imageProcessor';
-import { CropOverlay, CropOverlayHandle } from '@/components/crop-overlay';
+import { CropOverlay, DisplayCrop } from '@/components/crop-overlay';
 import { CropPreviewOverlay } from '@/components/crop-preview-overlay';
 
 // Constants
@@ -146,7 +146,6 @@ interface ImageItemProps {
   image: UploadedImage;
   onToggleSelection: (id: string) => void;
   onDelete: (id: string) => void;
-  onCustomCropApply: (imageId: string, cropArea: CropArea) => void;
   onCustomCropCancel: () => void;
   onApplyCropToImage: (imageId: string, aspectRatio: number | null, customCrop?: CropArea) => void;
   onSetImages: React.Dispatch<React.SetStateAction<UploadedImage[]>>;
@@ -157,7 +156,6 @@ function ImageItem({
   image, 
   onToggleSelection, 
   onDelete,
-  onCustomCropApply,
   onCustomCropCancel,
   onApplyCropToImage,
   onSetImages,
@@ -167,43 +165,157 @@ function ImageItem({
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const canvasElementRef = useRef<HTMLCanvasElement>(null);
   const sourceImgRef = useRef<HTMLImageElement>(null);
+  const cropModeImgRef = useRef<HTMLImageElement>(null); // Visible img during crop mode
   const sourceImgUrlRef = useRef<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  
+  // Track displayed image rect - single source of truth for where image is actually drawn
+  const displayedImageRectRef = useRef<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  
+  // Calculate displayed image rect for <img> during crop mode
+  // Use actual rendered bounds of the img element (via getBoundingClientRect)
+  // This ensures perfect match with CSS object-contain
+  const getDisplayedImageRectForImg = useCallback(() => {
+    if (!sourceImgRef.current || !imageContainerRef.current) {
+      return null;
+    }
+    
+    const img = sourceImgRef.current;
+    const container = imageContainerRef.current;
+    
+    if (!img.complete || !img.naturalWidth || !img.naturalHeight) {
+      return null;
+    }
+    
+    // Get actual rendered bounds of the img element (respects CSS object-contain)
+    const imgRect = img.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    
+    // Convert to container-relative coordinates
+    const x = imgRect.left - containerRect.left;
+    const y = imgRect.top - containerRect.top;
+    const width = imgRect.width;
+    const height = imgRect.height;
+    
+    // Validate
+    if (!isFinite(x) || !isFinite(y) || !isFinite(width) || !isFinite(height) ||
+        width <= 0 || height <= 0) {
+      // Fallback to calculated rect if getBoundingClientRect fails
+      const imgRatio = img.naturalWidth / img.naturalHeight;
+      const containerRatio = containerRect.width / containerRect.height;
+      
+      let drawWidth: number;
+      let drawHeight: number;
+      
+      if (imgRatio > containerRatio) {
+        drawWidth = containerRect.width;
+        drawHeight = containerRect.width / imgRatio;
+      } else {
+        drawHeight = containerRect.height;
+        drawWidth = containerRect.height * imgRatio;
+      }
+      
+      const offsetX = (containerRect.width - drawWidth) / 2;
+      const offsetY = (containerRect.height - drawHeight) / 2;
+      
+      return {
+        x: offsetX,
+        y: offsetY,
+        width: drawWidth,
+        height: drawHeight
+      };
+    }
+    
+    return {
+      x,
+      y,
+      width,
+      height
+    };
+  }, []);
 
   // Memoize callbacks to prevent infinite loops
   const handleCropAreaChange = useCallback((cropArea: CropArea) => {
-    // Store the crop area (already converted to image coordinates)
+    // Store the crop area (in canvas coordinates for preset crops)
     onSetImages(prev => prev.map(img => 
       img.id === image.id 
         ? { ...img, cropArea } 
         : img
     ));
   }, [image.id, onSetImages]);
+  
+  // Apply display crop - crops the entire canvas (image + background)
+  // Crop coordinates are in container/canvas pixels
+  const applyDisplayCrop = useCallback((displayCrop: DisplayCrop) => {
+    // Validate display crop first
+    if (!displayCrop ||
+        !isFinite(displayCrop.x) || !isFinite(displayCrop.y) ||
+        !isFinite(displayCrop.width) || !isFinite(displayCrop.height) ||
+        displayCrop.width <= 0 || displayCrop.height <= 0) {
+      console.error('Invalid display crop:', displayCrop);
+      return;
+    }
+    
+    const canvas = canvasElementRef.current;
+    if (!canvas) {
+      console.error('Canvas not found for crop');
+      return;
+    }
+    
+    // Crop coordinates are in container pixels, which match canvas pixels
+    // Clamp to canvas bounds
+    const canvasCrop: CropArea = {
+      x: Math.max(0, Math.min(Math.round(displayCrop.x), canvas.width)),
+      y: Math.max(0, Math.min(Math.round(displayCrop.y), canvas.height)),
+      width: Math.min(Math.round(displayCrop.width), canvas.width - Math.round(displayCrop.x)),
+      height: Math.min(Math.round(displayCrop.height), canvas.height - Math.round(displayCrop.y))
+    };
+    
+    // Final validation
+    if (
+      !isFinite(canvasCrop.x) || !isFinite(canvasCrop.y) ||
+      !isFinite(canvasCrop.width) || !isFinite(canvasCrop.height) ||
+      canvasCrop.width <= 0 || canvasCrop.height <= 0 ||
+      canvasCrop.x < 0 || canvasCrop.y < 0 ||
+      canvasCrop.x + canvasCrop.width > canvas.width ||
+      canvasCrop.y + canvasCrop.height > canvas.height
+    ) {
+      console.error('Invalid canvas crop:', { canvasCrop, canvasWidth: canvas.width, canvasHeight: canvas.height });
+      return;
+    }
+    
+    // Apply the crop to canvas (includes image + background)
+    onApplyCropToImage(image.id, null, canvasCrop);
+  }, [image.id, onApplyCropToImage]);
 
   // Update container size when image is displayed (needed for both custom crop and preview)
   useEffect(() => {
     const needsContainerSize = image.isCustomCropActive || image.cropPreviewAspectRatio !== undefined;
     
-    if (needsContainerSize && imageContainerRef.current) {
+    if (imageContainerRef.current) {
       const updateSize = () => {
         const rect = imageContainerRef.current?.getBoundingClientRect();
-        if (rect) {
+        if (rect && rect.width > 0 && rect.height > 0) {
           setContainerSize({ width: rect.width, height: rect.height });
         }
       };
+      
+      // Always update size if container exists (don't reset to 0)
       updateSize();
       const resizeObserver = new ResizeObserver(updateSize);
       resizeObserver.observe(imageContainerRef.current);
       return () => resizeObserver.disconnect();
-    } else if (!needsContainerSize) {
-      // Reset container size when crop modes are inactive
-      setContainerSize({ width: 0, height: 0 });
     }
   }, [image.isCustomCropActive, image.cropPreviewAspectRatio]);
 
-  const cropOverlayRef = useRef<CropOverlayHandle | null>(null);
 
   // Helper function to draw image with contain logic (scale to fit, center)
+  // Stores displayed image rect as single source of truth
   const drawImageContained = useCallback((
     ctx: CanvasRenderingContext2D,
     img: HTMLImageElement,
@@ -235,6 +347,14 @@ function ImageItem({
     // Center the image
     const offsetX = (canvasWidth - drawWidth) / 2;
     const offsetY = (canvasHeight - drawHeight) / 2;
+    
+    // Store displayed image rect - single source of truth
+    displayedImageRectRef.current = {
+      x: offsetX,
+      y: offsetY,
+      width: drawWidth,
+      height: drawHeight
+    };
     
     // Draw image centered
     ctx.drawImage(
@@ -363,8 +483,10 @@ function ImageItem({
     sourceImgUrlRef.current = url;
     
     if (sourceImgRef.current) {
-      // Clear the old image first
+      // Clear the old image first to force reload
       sourceImgRef.current.src = '';
+      sourceImgRef.current.onload = null;
+      
       // Set new image source
       sourceImgRef.current.src = url;
       
@@ -376,11 +498,12 @@ function ImageItem({
         }, 0);
       };
       
+      // Always add load listener (even if complete) to handle new images
+      sourceImgRef.current.addEventListener('load', handleLoad, { once: true });
+      
+      // If already loaded, trigger render immediately
       if (sourceImgRef.current.complete && sourceImgRef.current.naturalWidth > 0) {
-        // Image already loaded, render immediately
-        renderToCanvas();
-      } else {
-        sourceImgRef.current.addEventListener('load', handleLoad, { once: true });
+        handleLoad();
       }
       
       return () => {
@@ -510,6 +633,7 @@ function ImageItem({
           ref={imageContainerRef}
           className="w-full h-full relative"
         >
+          {/* Canvas always visible - shows image + background */}
           <canvas
             ref={canvasElementRef}
             className={cn(
@@ -517,6 +641,23 @@ function ImageItem({
               image.backgroundType === 'transparent' && "drop-shadow-lg"
             )}
           />
+          {/* Custom crop overlay - works on entire canvas area */}
+          {image.isCustomCropActive && containerSize.width > 0 && containerSize.height > 0 && (
+            <CropOverlay
+              containerWidth={containerSize.width}
+              containerHeight={containerSize.height}
+              imageUrl={sourceImgRef.current?.src || image.url}
+              displayedImageRect={{
+                x: 0,
+                y: 0,
+                width: containerSize.width,
+                height: containerSize.height
+              }}
+              onCrop={applyDisplayCrop}
+              onCancel={onCustomCropCancel}
+            />
+          )}
+          {/* Processing and error overlays */}
           {image.isProcessing && (
             <div 
               className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-80 z-20"
@@ -546,31 +687,32 @@ function ImageItem({
               renderToCanvas();
             }}
           />
-          {image.isCustomCropActive && containerSize.width > 0 && (
-            <CropOverlay
-              ref={cropOverlayRef}
-              imageId={image.id}
-              imageUrl={image.url}
-              containerWidth={containerSize.width}
-              containerHeight={containerSize.height}
-              onCrop={(cropArea) => onCustomCropApply(image.id, cropArea)}
-              onCancel={onCustomCropCancel}
-              initialCrop={image.cropArea}
-            />
-          )}
           {image.cropPreviewAspectRatio !== undefined && 
            image.cropPreviewAspectRatio !== null && 
            !image.isCustomCropActive &&
-           containerSize.width > 0 && (
-            <CropPreviewOverlay
-              key={`${image.id}-${image.cropPreviewAspectRatio}`}
-              containerWidth={containerSize.width}
-              containerHeight={containerSize.height}
-              aspectRatio={image.cropPreviewAspectRatio}
-              imageUrl={image.url}
-              onCropAreaChange={handleCropAreaChange}
-            />
-          )}
+           containerSize.width > 0 && (() => {
+             // Get displayed image rect - use canvas rect if available
+             const displayedRect = displayedImageRectRef.current;
+             const img = sourceImgRef.current;
+             
+             if (!displayedRect || !img || !img.naturalWidth || !img.naturalHeight) {
+               return null;
+             }
+             
+             return (
+               <CropPreviewOverlay
+                 key={`${image.id}-${image.cropPreviewAspectRatio}`}
+                 containerWidth={containerSize.width}
+                 containerHeight={containerSize.height}
+                 aspectRatio={image.cropPreviewAspectRatio}
+                 displayedImageRect={displayedRect}
+                 imageNaturalWidth={img.naturalWidth}
+                 imageNaturalHeight={img.naturalHeight}
+                 imageUrl={image.url}
+                 onCropAreaChange={handleCropAreaChange}
+               />
+             );
+           })()}
         </div>
 
         {/* Format and Compression Tags */}
@@ -660,13 +802,11 @@ function ImageItem({
       )}
 
       {/* Crop Control Buttons - Below Image */}
-      {(image.isCustomCropActive || image.cropPreviewAspectRatio !== undefined) && (
+      {image.cropPreviewAspectRatio !== undefined && (
         <div className="mt-3 flex items-center justify-center gap-3">
           <button
             onClick={() => {
-              if (image.isCustomCropActive && cropOverlayRef.current) {
-                cropOverlayRef.current.apply();
-              } else if (image.cropPreviewAspectRatio !== undefined && image.cropArea) {
+              if (image.cropPreviewAspectRatio !== undefined && image.cropArea) {
                 // Apply preset crop with custom position/size
                 onApplyCropToImage(image.id, image.cropPreviewAspectRatio, image.cropArea);
                 onSetImages(prev => prev.map(img => 
@@ -959,41 +1099,122 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
             );
           });
 
-          const processedBlob = await cropImage(image.file, { aspectRatio, customCrop });
-          const processedDataURL = await blobToDataURL(processedBlob);
-          
-          const processedFile = new File(
-            [processedBlob], 
-            image.file.name, 
-            { type: image.file.type }
-          );
-          
-          setImages(prevState => {
-            const currentImage = prevState.find(img => img.id === imageId);
-            if (!currentImage) return prevState;
-
-            // Revoke old URL
-            if (currentImage.url.startsWith('blob:')) {
-              URL.revokeObjectURL(currentImage.url);
+          // If customCrop is provided, it's in canvas coordinates - crop the canvas
+          if (customCrop && 
+              Number.isFinite(customCrop.x) &&
+              Number.isFinite(customCrop.y) &&
+              Number.isFinite(customCrop.width) &&
+              Number.isFinite(customCrop.height) &&
+              customCrop.width > 0 &&
+              customCrop.height > 0) {
+            
+            // Get the canvas element
+            const container = document.querySelector(`[data-image-id="${imageId}"]`);
+            const canvas = container?.querySelector('canvas') as HTMLCanvasElement;
+            
+            if (!canvas) {
+              throw new Error('Canvas not found');
             }
-
-            return prevState.map(img => 
-              img.id === imageId 
-                ? { 
-                    ...img, 
-                    file: processedFile,
-                    url: processedDataURL,
-                    processedUrl: undefined,
-                    isProcessing: false,
-                    error: undefined,
-                    isCustomCropActive: false,
-                    cropArea: undefined,
-                    cropPreviewAspectRatio: undefined,
-                    originalFile: img.originalFile || img.file // Preserve original file
-                  } 
-                : img
+            
+            // Create a new canvas with the cropped dimensions
+            const croppedCanvas = document.createElement('canvas');
+            croppedCanvas.width = Math.round(customCrop.width);
+            croppedCanvas.height = Math.round(customCrop.height);
+            const ctx = croppedCanvas.getContext('2d');
+            
+            if (!ctx) {
+              throw new Error('Could not get canvas context');
+            }
+            
+            // Draw the cropped portion of the original canvas
+            ctx.drawImage(
+              canvas,
+              customCrop.x, customCrop.y, customCrop.width, customCrop.height, // Source rect
+              0, 0, croppedCanvas.width, croppedCanvas.height // Destination rect
             );
-          });
+            
+            // Convert to blob
+            const processedBlob = await new Promise<Blob>((resolve, reject) => {
+              croppedCanvas.toBlob((blob) => {
+                if (blob) {
+                  resolve(blob);
+                } else {
+                  reject(new Error('Failed to create blob'));
+                }
+              }, image.file.type || 'image/png', 0.95);
+            });
+            
+            const processedDataURL = await blobToDataURL(processedBlob);
+            const processedFile = new File(
+              [processedBlob], 
+              image.file.name, 
+              { type: image.file.type || 'image/png' }
+            );
+            
+            setImages(prevState => {
+              const currentImage = prevState.find(img => img.id === imageId);
+              if (!currentImage) return prevState;
+
+              // Revoke old URL
+              if (currentImage.url.startsWith('blob:')) {
+                URL.revokeObjectURL(currentImage.url);
+              }
+
+              return prevState.map(img => 
+                img.id === imageId 
+                  ? { 
+                      ...img, 
+                      file: processedFile,
+                      url: processedDataURL,
+                      processedUrl: undefined,
+                      isProcessing: false,
+                      error: undefined,
+                      isCustomCropActive: false,
+                      cropArea: undefined,
+                      cropPreviewAspectRatio: undefined,
+                      originalFile: img.originalFile || img.file // Preserve original file
+                    } 
+                  : img
+              );
+            });
+          } else if (aspectRatio !== null) {
+            // Preset aspect ratio crop - use image processor
+            const processedBlob = await cropImage(image.file, { aspectRatio, customCrop: undefined });
+            const processedDataURL = await blobToDataURL(processedBlob);
+            
+            const processedFile = new File(
+              [processedBlob], 
+              image.file.name, 
+              { type: image.file.type }
+            );
+            
+            setImages(prevState => {
+              const currentImage = prevState.find(img => img.id === imageId);
+              if (!currentImage) return prevState;
+
+              // Revoke old URL
+              if (currentImage.url.startsWith('blob:')) {
+                URL.revokeObjectURL(currentImage.url);
+              }
+
+              return prevState.map(img => 
+                img.id === imageId 
+                  ? { 
+                      ...img, 
+                      file: processedFile,
+                      url: processedDataURL,
+                      processedUrl: undefined,
+                      isProcessing: false,
+                      error: undefined,
+                      isCustomCropActive: false,
+                      cropArea: undefined,
+                      cropPreviewAspectRatio: undefined,
+                      originalFile: img.originalFile || img.file
+                    } 
+                  : img
+              );
+            });
+          }
         } catch (error) {
           console.error('Failed to crop image:', error);
           const errorMessage = error instanceof Error ? error.message : 'Failed to crop image';
@@ -1053,7 +1274,89 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
               );
             });
 
-            const processedBlob = await cropImage(image.file, { aspectRatio, customCrop });
+            // For preset crops with customCrop, crop the canvas
+            if (customCrop &&
+                Number.isFinite(customCrop.x) &&
+                Number.isFinite(customCrop.y) &&
+                Number.isFinite(customCrop.width) &&
+                Number.isFinite(customCrop.height) &&
+                customCrop.width > 0 &&
+                customCrop.height > 0) {
+              
+              // Get the canvas element
+              const container = document.querySelector(`[data-image-id="${imageId}"]`);
+              const canvas = container?.querySelector('canvas') as HTMLCanvasElement;
+              
+              if (!canvas) {
+                throw new Error('Canvas not found');
+              }
+              
+              // Create a new canvas with the cropped dimensions
+              const croppedCanvas = document.createElement('canvas');
+              croppedCanvas.width = Math.round(customCrop.width);
+              croppedCanvas.height = Math.round(customCrop.height);
+              const ctx = croppedCanvas.getContext('2d');
+              
+              if (!ctx) {
+                throw new Error('Could not get canvas context');
+              }
+              
+              // Draw the cropped portion of the original canvas
+              ctx.drawImage(
+                canvas,
+                customCrop.x, customCrop.y, customCrop.width, customCrop.height, // Source rect
+                0, 0, croppedCanvas.width, croppedCanvas.height // Destination rect
+              );
+              
+              // Convert to blob
+              const processedBlob = await new Promise<Blob>((resolve, reject) => {
+                croppedCanvas.toBlob((blob) => {
+                  if (blob) {
+                    resolve(blob);
+                  } else {
+                    reject(new Error('Failed to create blob'));
+                  }
+                }, image.file.type || 'image/png', 0.95);
+              });
+              
+              const processedDataURL = await blobToDataURL(processedBlob);
+              const processedFile = new File(
+                [processedBlob], 
+                image.file.name, 
+                { type: image.file.type || 'image/png' }
+              );
+              
+              setImages(prevState => {
+                const currentImage = prevState.find(img => img.id === imageId);
+                if (!currentImage) return prevState;
+
+                // Revoke old URL
+                if (currentImage.url.startsWith('blob:')) {
+                  URL.revokeObjectURL(currentImage.url);
+                }
+
+                return prevState.map(img => 
+                  img.id === imageId 
+                    ? { 
+                        ...img, 
+                        file: processedFile,
+                        url: processedDataURL,
+                        processedUrl: undefined,
+                        isProcessing: false,
+                        error: undefined,
+                        isCustomCropActive: false,
+                        cropArea: undefined,
+                        cropPreviewAspectRatio: undefined,
+                        originalFile: img.originalFile || img.file
+                      } 
+                    : img
+                );
+              });
+              return;
+            }
+            
+            // For preset aspect ratio without customCrop, use image processor
+            const processedBlob = await cropImage(image.file, { aspectRatio, customCrop: undefined });
             const processedDataURL = await blobToDataURL(processedBlob);
             
             const processedFile = new File(
@@ -1126,42 +1429,6 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
         : img
     ));
   }, []);
-
-  const handleCustomCropApply = useCallback((imageId: string, cropArea: CropArea) => {
-    // Convert to numbers and validate crop area
-    const cropX = Number(cropArea?.x);
-    const cropY = Number(cropArea?.y);
-    const cropW = Number(cropArea?.width);
-    const cropH = Number(cropArea?.height);
-    
-    // Validate crop coordinates
-    if (!cropArea || 
-        !Number.isFinite(cropX) || !Number.isFinite(cropY) ||
-        !Number.isFinite(cropW) || !Number.isFinite(cropH) ||
-        isNaN(cropX) || isNaN(cropY) || isNaN(cropW) || isNaN(cropH) ||
-        cropW <= 0 || cropH <= 0 || cropX < 0 || cropY < 0) {
-      console.error('Invalid crop area in handleCustomCropApply:', { cropArea, cropX, cropY, cropW, cropH });
-      return;
-    }
-    
-    // Create validated crop area with explicit numbers
-    const validatedCropArea: CropArea = {
-      x: Number(cropX),
-      y: Number(cropY),
-      width: Number(cropW),
-      height: Number(cropH)
-    };
-    
-    setCustomCropMode(false);
-    setImages(prev => prev.map(img => 
-      img.id === imageId 
-        ? { ...img, isCustomCropActive: false } 
-        : img
-    ));
-    
-    // Apply the crop to this specific image with validated crop area
-    applyCropToImage(imageId, null, validatedCropArea);
-  }, [applyCropToImage]);
 
   const handleCustomCropCancel = useCallback(() => {
     setCustomCropMode(false);
@@ -2154,7 +2421,6 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                 image={image}
                 onToggleSelection={toggleImageSelection}
                 onDelete={deleteImage}
-                onCustomCropApply={handleCustomCropApply}
                 onCustomCropCancel={handleCustomCropCancel}
                 onApplyCropToImage={applyCropToImage}
                 onSetImages={setImages}

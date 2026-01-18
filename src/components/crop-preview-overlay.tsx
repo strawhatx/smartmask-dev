@@ -12,6 +12,9 @@ interface CropPreviewOverlayProps {
   containerWidth: number;
   containerHeight: number;
   aspectRatio: number;
+  displayedImageRect: { x: number; y: number; width: number; height: number } | null;
+  imageNaturalWidth: number;
+  imageNaturalHeight: number;
   onCropAreaChange?: (cropArea: CropArea) => void;
   imageUrl?: string;
 }
@@ -20,46 +23,82 @@ export function CropPreviewOverlay({
   containerWidth, 
   containerHeight, 
   aspectRatio,
+  displayedImageRect,
+  imageNaturalWidth,
+  imageNaturalHeight,
   onCropAreaChange,
   imageUrl
 }: CropPreviewOverlayProps) {
   const calculateInitialCropArea = useCallback(() => {
-    // Calculate crop dimensions based on aspect ratio, ensuring it fits within container
-    const containerRatio = containerWidth / containerHeight;
+    // Calculate crop dimensions based on aspect ratio, ensuring it fits within displayed image
+    if (!displayedImageRect || displayedImageRect.width <= 0 || displayedImageRect.height <= 0) {
+      // Fallback to container-based calculation if displayedImageRect is not available
+      const containerRatio = containerWidth / containerHeight;
+      
+      let cropWidth: number;
+      let cropHeight: number;
+      
+      if (containerRatio > aspectRatio) {
+        cropHeight = Math.min(containerHeight * 0.8, containerHeight - 20);
+        cropWidth = cropHeight * aspectRatio;
+        if (cropWidth > containerWidth - 20) {
+          cropWidth = containerWidth - 20;
+          cropHeight = cropWidth / aspectRatio;
+        }
+      } else {
+        cropWidth = Math.min(containerWidth * 0.8, containerWidth - 20);
+        cropHeight = cropWidth / aspectRatio;
+        if (cropHeight > containerHeight - 20) {
+          cropHeight = containerHeight - 20;
+          cropWidth = cropHeight * aspectRatio;
+        }
+      }
+      
+      return {
+        x: Math.max(0, (containerWidth - cropWidth) / 2),
+        y: Math.max(0, (containerHeight - cropHeight) / 2),
+        width: cropWidth,
+        height: cropHeight
+      };
+    }
+    
+    // Use displayedImageRect for accurate cropping
+    const imgRect = displayedImageRect;
+    const imgRatio = imgRect.width / imgRect.height;
     
     let cropWidth: number;
     let cropHeight: number;
-    let cropX: number;
-    let cropY: number;
-
-    if (containerRatio > aspectRatio) {
-      // Container is wider - fit height (aspect ratio is taller than container)
-      cropHeight = Math.min(containerHeight * 0.8, containerHeight - 20); // Leave some margin
+    
+    // Calculate crop size to fit within displayed image
+    // Use larger size (90-95%) for better visibility, especially for portrait ratios
+    const sizeFactor = aspectRatio < 1 ? 0.95 : 0.9; // Portrait gets 95%, landscape gets 90%
+    
+    if (imgRatio > aspectRatio) {
+      // Displayed image is wider than crop aspect ratio - fit to height
+      cropHeight = imgRect.height * sizeFactor;
       cropWidth = cropHeight * aspectRatio;
-      
-      // Ensure width doesn't exceed container
-      if (cropWidth > containerWidth - 20) {
-        cropWidth = containerWidth - 20;
+      // Ensure it doesn't exceed width
+      if (cropWidth > imgRect.width * sizeFactor) {
+        cropWidth = imgRect.width * sizeFactor;
         cropHeight = cropWidth / aspectRatio;
       }
     } else {
-      // Container is taller - fit width (aspect ratio is wider than container)
-      cropWidth = Math.min(containerWidth * 0.8, containerWidth - 20); // Leave some margin
+      // Displayed image is taller than crop aspect ratio - fit to width
+      cropWidth = imgRect.width * sizeFactor;
       cropHeight = cropWidth / aspectRatio;
-      
-      // Ensure height doesn't exceed container
-      if (cropHeight > containerHeight - 20) {
-        cropHeight = containerHeight - 20;
+      // Ensure it doesn't exceed height
+      if (cropHeight > imgRect.height * sizeFactor) {
+        cropHeight = imgRect.height * sizeFactor;
         cropWidth = cropHeight * aspectRatio;
       }
     }
-
-    // Center the crop area
-    cropX = Math.max(0, (containerWidth - cropWidth) / 2);
-    cropY = Math.max(0, (containerHeight - cropHeight) / 2);
+    
+    // Center the crop area within the displayed image
+    const cropX = imgRect.x + (imgRect.width - cropWidth) / 2;
+    const cropY = imgRect.y + (imgRect.height - cropHeight) / 2;
 
     return { x: cropX, y: cropY, width: cropWidth, height: cropHeight };
-  }, [containerWidth, containerHeight, aspectRatio]);
+  }, [containerWidth, containerHeight, aspectRatio, displayedImageRect]);
 
   const [cropArea, setCropArea] = useState<CropArea>(calculateInitialCropArea);
   const [isDragging, setIsDragging] = useState(false);
@@ -75,122 +114,128 @@ export function CropPreviewOverlay({
   const constrainCropArea = useCallback((area: CropArea, maintainAspectRatio: boolean = true): CropArea => {
     let { x, y, width, height } = area;
     
+    // Constrain to displayed image bounds if available, otherwise use container
+    const minX = displayedImageRect ? displayedImageRect.x : 0;
+    const minY = displayedImageRect ? displayedImageRect.y : 0;
+    const maxWidth = displayedImageRect ? displayedImageRect.width : containerWidth;
+    const maxHeight = displayedImageRect ? displayedImageRect.height : containerHeight;
+    const maxX = minX + maxWidth;
+    const maxY = minY + maxHeight;
+    
     if (maintainAspectRatio) {
       // Always maintain aspect ratio - recalculate based on width
       height = width / aspectRatio;
       
-      // Ensure crop area stays within bounds
+      // Ensure crop area stays within displayed image bounds
       // First, constrain width
-      width = Math.max(50, Math.min(width, containerWidth));
+      width = Math.max(50, Math.min(width, maxWidth));
       height = width / aspectRatio;
       
-      // If height exceeds container, adjust width
-      if (height > containerHeight) {
-        height = containerHeight;
+      // If height exceeds bounds, adjust width
+      if (height > maxHeight) {
+        height = maxHeight;
         width = height * aspectRatio;
       }
     } else {
       // Free resize - just constrain to bounds
-      width = Math.max(50, Math.min(width, containerWidth));
-      height = Math.max(50, Math.min(height, containerHeight));
+      width = Math.max(50, Math.min(width, maxWidth));
+      height = Math.max(50, Math.min(height, maxHeight));
     }
     
-    // Now constrain position
-    x = Math.max(0, Math.min(x, containerWidth - width));
-    y = Math.max(0, Math.min(y, containerHeight - height));
+    // Now constrain position to displayed image bounds
+    x = Math.max(minX, Math.min(x, maxX - width));
+    y = Math.max(minY, Math.min(y, maxY - height));
     
     return { x, y, width, height };
-  }, [containerWidth, containerHeight, aspectRatio]);
+  }, [containerWidth, containerHeight, aspectRatio, displayedImageRect]);
+
+  const cropStartRef = useRef<CropArea | null>(null);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
+    // Don't handle if clicking on buttons or other UI elements
+    if ((e.target as HTMLElement).closest('button')) {
+      return;
+    }
     
-    // Only allow dragging for preset crops (no resizing)
-    setIsDragging(true);
-    setDragStart({
-      x: e.clientX - cropArea.x,
-      y: e.clientY - cropArea.y
-    });
+    const rect = overlayRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Check if clicking inside crop area
+    if (x >= cropArea.x && x <= cropArea.x + cropArea.width &&
+        y >= cropArea.y && y <= cropArea.y + cropArea.height) {
+      setIsDragging(true);
+      cropStartRef.current = { ...cropArea };
+      setDragStart({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      });
+      e.stopPropagation();
+      e.preventDefault();
+    }
   }, [cropArea]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (isDragging) {
-      const newX = e.clientX - dragStart.x;
-      const newY = e.clientY - dragStart.y;
-      
-      // For preset crops, only allow moving - keep dimensions, only constrain position
-      setCropArea(prev => {
-        // Keep the same width/height, only update position and clamp it
-        const clampedX = Math.max(0, Math.min(newX, containerWidth - prev.width));
-        const clampedY = Math.max(0, Math.min(newY, containerHeight - prev.height));
-        
-        return {
-          ...prev,
-          x: clampedX,
-          y: clampedY
-        };
-      });
-    }
-    // Resizing is disabled for preset crops - removed resize logic
-  }, [isDragging, dragStart, containerWidth, containerHeight]);
+    if (!isDragging || !cropStartRef.current) return;
+    
+    const rect = overlayRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const dx = x - dragStart.x;
+    const dy = y - dragStart.y;
+    
+    // Move the crop area while maintaining aspect ratio and dimensions
+    const newCrop = {
+      ...cropStartRef.current,
+      x: cropStartRef.current.x + dx,
+      y: cropStartRef.current.y + dy
+    };
+    
+    // Constrain to displayed image bounds
+    setCropArea(constrainCropArea(newCrop, true));
+  }, [isDragging, dragStart, constrainCropArea]);
 
-  // Notify parent of crop area changes with image coordinates
+  // Notify parent of crop area changes with canvas coordinates
+  // Crop coordinates are already in canvas/container pixels - pass them directly
   useEffect(() => {
-    if (!onCropAreaChange || !imageUrl || !overlayRef.current) return;
-    
-    // overlayRef is on the crop area border, parent is overlay root, parent.parent is container
-    const overlayRoot = overlayRef.current.parentElement;
-    const container = overlayRoot?.parentElement;
-    
-    if (!container) return;
-    
-    const containerRect = container.getBoundingClientRect();
-    const imgElement = container.querySelector('img') as HTMLImageElement;
-    
-    let convertedCropArea: CropArea;
-    
-    if (imgElement && imgElement.complete) {
-      const imgRect = imgElement.getBoundingClientRect();
-      const scaleX = imgElement.naturalWidth / imgRect.width;
-      const scaleY = imgElement.naturalHeight / imgRect.height;
-      
-      const imgDisplayX = imgRect.left - containerRect.left;
-      const imgDisplayY = imgRect.top - containerRect.top;
-      
-      const cropXRelativeToImage = cropArea.x - imgDisplayX;
-      const cropYRelativeToImage = cropArea.y - imgDisplayY;
-      
-      const clampedX = Math.max(0, Math.min(cropXRelativeToImage, imgRect.width));
-      const clampedY = Math.max(0, Math.min(cropYRelativeToImage, imgRect.height));
-      const clampedWidth = Math.max(1, Math.min(cropArea.width, imgRect.width - clampedX));
-      const clampedHeight = Math.max(1, Math.min(cropArea.height, imgRect.height - clampedY));
-      
-      convertedCropArea = {
-        x: clampedX * scaleX,
-        y: clampedY * scaleY,
-        width: clampedWidth * scaleX,
-        height: clampedHeight * scaleY
-      };
-    } else {
-      // Fallback: pass container coordinates
-      convertedCropArea = cropArea;
+    if (!onCropAreaChange) {
+      return;
     }
+    
+    // Validate crop area
+    if (!isFinite(cropArea.x) || !isFinite(cropArea.y) ||
+        !isFinite(cropArea.width) || !isFinite(cropArea.height) ||
+        cropArea.width <= 0 || cropArea.height <= 0) {
+      return;
+    }
+    
+    // Pass canvas coordinates directly (cropArea is already in container/canvas pixels)
+    const canvasCrop: CropArea = {
+      x: cropArea.x,
+      y: cropArea.y,
+      width: cropArea.width,
+      height: cropArea.height
+    };
     
     // Only notify if the crop area has actually changed (prevent infinite loops)
     const last = lastNotifiedCropArea.current;
     if (!last || 
-        Math.abs(last.x - convertedCropArea.x) > 0.1 ||
-        Math.abs(last.y - convertedCropArea.y) > 0.1 ||
-        Math.abs(last.width - convertedCropArea.width) > 0.1 ||
-        Math.abs(last.height - convertedCropArea.height) > 0.1) {
-      lastNotifiedCropArea.current = convertedCropArea;
-      onCropAreaChange(convertedCropArea);
+        Math.abs(last.x - canvasCrop.x) > 0.1 ||
+        Math.abs(last.y - canvasCrop.y) > 0.1 ||
+        Math.abs(last.width - canvasCrop.width) > 0.1 ||
+        Math.abs(last.height - canvasCrop.height) > 0.1) {
+      lastNotifiedCropArea.current = canvasCrop;
+      onCropAreaChange(canvasCrop);
     }
-  }, [cropArea, onCropAreaChange, imageUrl]);
+  }, [cropArea, onCropAreaChange]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
+    cropStartRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -250,13 +295,15 @@ export function CropPreviewOverlay({
       {/* Crop area border */}
       <div
         ref={overlayRef}
-        className="absolute border-2 border-white cursor-move"
+        className="absolute border-2 border-white"
         style={{
           left: cropArea.x,
           top: cropArea.y,
           width: cropArea.width,
           height: cropArea.height,
-          boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.3)'
+          boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.3)',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          pointerEvents: 'auto'
         }}
         onMouseDown={handleMouseDown}
       >

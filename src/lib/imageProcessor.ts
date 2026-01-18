@@ -150,6 +150,17 @@ export async function cropImage(
   imageFile: File,
   options: CropOptions
 ): Promise<Blob> {
+  // Sanitize customCrop - convert invalid values to undefined
+  if (options.customCrop &&
+      (!Number.isFinite(options.customCrop.x) ||
+       !Number.isFinite(options.customCrop.y) ||
+       !Number.isFinite(options.customCrop.width) ||
+       !Number.isFinite(options.customCrop.height) ||
+       options.customCrop.width <= 0 ||
+       options.customCrop.height <= 0)) {
+    options = { ...options, customCrop: undefined };
+  }
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
