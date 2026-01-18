@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { 
   Home, Image as ImageIcon, Crop as CropIcon, Maximize2,
   FileText, Upload, Trash2, CheckSquare, Square, RotateCw,
-  ZoomIn, Tag, ArrowLeft, Minimize2, RefreshCw, TrendingUp, Loader2, Check, X
+  ZoomIn, Tag, ArrowLeft, Minimize2, RefreshCw, TrendingUp, Loader2, Check, X, Download, ChevronDown
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BackgroundPanel } from '@/components/background-panel';
@@ -21,15 +21,11 @@ import { CropPreviewOverlay } from '@/components/crop-preview-overlay';
 // Constants
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
-const TRANSPARENT_CHECKERBOARD_PATTERN = {
-  backgroundImage: 'linear-gradient(45deg, #f0f0f0 25%, transparent 25%), linear-gradient(-45deg, #f0f0f0 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f0f0f0 75%), linear-gradient(-45deg, transparent 75%, #f0f0f0 75%)',
-  backgroundSize: '20px 20px',
-  backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px'
-} as const;
 
 // Types
 export type BackgroundType = 'blur' | 'color' | 'texture' | 'transparent';
 export type SidebarSection = 'home' | 'background' | 'crop' | 'resize' | 'compress' | 'convert' | 'upscaler';
+export type ExportType = 'convert' | 'compress' | 'upscale' | null;
 
 export interface UploadedImage {
   id: string;
@@ -51,6 +47,7 @@ export interface UploadedImage {
   convertedFormat?: ImageFormat;
   isCompressed?: boolean;
   isUpscaled?: boolean;
+  originalFile?: File; // Store original file for export
 }
 
 interface EditorWorkspaceProps {
@@ -147,7 +144,6 @@ async function resizeImageFile(imageFile: File, width: number, height: number): 
 // Image Item Component
 interface ImageItemProps {
   image: UploadedImage;
-  backgroundStyle: React.CSSProperties | undefined;
   onToggleSelection: (id: string) => void;
   onDelete: (id: string) => void;
   onCustomCropApply: (imageId: string, cropArea: CropArea) => void;
@@ -159,7 +155,6 @@ interface ImageItemProps {
 
 function ImageItem({ 
   image, 
-  backgroundStyle, 
   onToggleSelection, 
   onDelete,
   onCustomCropApply,
@@ -170,7 +165,9 @@ function ImageItem({
 }: ImageItemProps) {
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-  const imgRef = useRef<HTMLImageElement>(null);
+  const canvasElementRef = useRef<HTMLCanvasElement>(null);
+  const sourceImgRef = useRef<HTMLImageElement>(null);
+  const sourceImgUrlRef = useRef<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
   // Memoize callbacks to prevent infinite loops
@@ -205,6 +202,236 @@ function ImageItem({
   }, [image.isCustomCropActive, image.cropPreviewAspectRatio]);
 
   const cropOverlayRef = useRef<CropOverlayHandle | null>(null);
+
+  // Helper function to draw image with contain logic (scale to fit, center)
+  const drawImageContained = useCallback((
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    sourceX: number,
+    sourceY: number,
+    sourceWidth: number,
+    sourceHeight: number,
+    canvasWidth: number,
+    canvasHeight: number
+  ) => {
+    // Calculate aspect ratios
+    const imgRatio = sourceWidth / sourceHeight;
+    const canvasRatio = canvasWidth / canvasHeight;
+    
+    let drawWidth: number;
+    let drawHeight: number;
+    
+    // Scale to fit (contain logic)
+    if (imgRatio > canvasRatio) {
+      // Image is wider - fit to width
+      drawWidth = canvasWidth;
+      drawHeight = canvasWidth / imgRatio;
+    } else {
+      // Image is taller - fit to height
+      drawHeight = canvasHeight;
+      drawWidth = canvasHeight * imgRatio;
+    }
+    
+    // Center the image
+    const offsetX = (canvasWidth - drawWidth) / 2;
+    const offsetY = (canvasHeight - drawHeight) / 2;
+    
+    // Draw image centered
+    ctx.drawImage(
+      img,
+      sourceX, sourceY, sourceWidth, sourceHeight,
+      offsetX, offsetY, drawWidth, drawHeight
+    );
+  }, []);
+
+  // Render image to canvas with all edits applied
+  const renderToCanvas = useCallback(() => {
+    if (!sourceImgRef.current || !canvasElementRef.current || !imageContainerRef.current) return;
+    
+    const img = sourceImgRef.current;
+    const canvas = canvasElementRef.current;
+    const container = imageContainerRef.current;
+    
+    // Wait for image to load
+    if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) {
+      return;
+    }
+    
+    // Get container dimensions for canvas pixel size
+    const containerRect = container.getBoundingClientRect();
+    const canvasWidth = containerRect.width;
+    const canvasHeight = containerRect.height;
+    
+    if (canvasWidth === 0 || canvasHeight === 0) {
+      return;
+    }
+    
+    // Determine source crop area
+    // Note: After crop is applied, the file is already cropped, so cropArea should be undefined
+    // We only use cropArea during preview (when isCustomCropActive is true)
+    // Once applied, the file itself is cropped, so we render the full image from the cropped file
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceWidth = img.naturalWidth;
+    let sourceHeight = img.naturalHeight;
+    
+    // Don't apply cropArea here - if crop was applied, the file is already cropped
+    // cropArea is only for preview/overlay display, not for canvas rendering
+    
+    // Set canvas pixel dimensions to match container (this clears the canvas automatically)
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    
+    // Get fresh context after resizing (setting width/height resets context)
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    
+    // Fill background first - fill entire canvas
+    if (image.backgroundType && image.background) {
+      switch (image.backgroundType) {
+        case 'color':
+          context.fillStyle = image.background;
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          break;
+        case 'blur':
+          // Draw blurred version as background
+          context.filter = 'blur(20px)';
+          context.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight, -50, -50, canvas.width + 100, canvas.height + 100);
+          context.filter = 'none';
+          context.fillStyle = 'rgba(0, 0, 0, 0.1)';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          break;
+        case 'texture':
+          const textureImg = new Image();
+          textureImg.crossOrigin = 'anonymous';
+          textureImg.onload = () => {
+            // Get fresh context
+            const texCtx = canvas.getContext('2d');
+            if (!texCtx) return;
+            
+            // Fill background with texture
+            const pattern = texCtx.createPattern(textureImg, 'repeat');
+            if (pattern) {
+              texCtx.fillStyle = pattern;
+              texCtx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            
+            // Draw image with contain logic
+            drawImageContained(texCtx, img, sourceX, sourceY, sourceWidth, sourceHeight, canvas.width, canvas.height);
+          };
+          textureImg.src = image.background;
+          return; // Texture handles drawing in onload
+        case 'transparent':
+          // Canvas is already transparent, no background fill needed
+          break;
+      }
+    }
+    
+    // Draw image with contain logic (scale to fit, center it)
+    // This ensures background is visible around the image
+    if (image.backgroundType !== 'texture') {
+      drawImageContained(context, img, sourceX, sourceY, sourceWidth, sourceHeight, canvas.width, canvas.height);
+    }
+    
+    // Update dimensions for display (use resize if specified, otherwise use crop or original)
+    let displayWidth = sourceWidth;
+    let displayHeight = sourceHeight;
+    
+    if (image.resizeWidth && image.resizeHeight) {
+      displayWidth = image.resizeWidth;
+      displayHeight = image.resizeHeight;
+    }
+    
+    setDimensions({
+      width: displayWidth,
+      height: displayHeight
+    });
+  }, [image.cropArea, image.resizeWidth, image.resizeHeight, image.backgroundType, image.background, drawImageContained]);
+  
+  // Set up source image URL - always use the current file (which is already cropped if crop was applied)
+  useEffect(() => {
+    // Use the current file (already processed/cropped), not originalFile
+    // The canvas should render what the user sees, which is the processed file
+    const file = image.file;
+    const url = URL.createObjectURL(file);
+    
+    // Revoke old URL
+    if (sourceImgUrlRef.current) {
+      URL.revokeObjectURL(sourceImgUrlRef.current);
+    }
+    
+    sourceImgUrlRef.current = url;
+    
+    if (sourceImgRef.current) {
+      // Clear the old image first
+      sourceImgRef.current.src = '';
+      // Set new image source
+      sourceImgRef.current.src = url;
+      
+      // Force canvas re-render after image loads
+      const handleLoad = () => {
+        // Small delay to ensure image is fully loaded
+        setTimeout(() => {
+          renderToCanvas();
+        }, 0);
+      };
+      
+      if (sourceImgRef.current.complete && sourceImgRef.current.naturalWidth > 0) {
+        // Image already loaded, render immediately
+        renderToCanvas();
+      } else {
+        sourceImgRef.current.addEventListener('load', handleLoad, { once: true });
+      }
+      
+      return () => {
+        sourceImgRef.current?.removeEventListener('load', handleLoad);
+      };
+    }
+    
+    return () => {
+      if (sourceImgUrlRef.current) {
+        URL.revokeObjectURL(sourceImgUrlRef.current);
+        sourceImgUrlRef.current = null;
+      }
+    };
+  }, [image.file, renderToCanvas]);
+
+  // Update canvas when container size changes
+  useEffect(() => {
+    if (!imageContainerRef.current) return;
+    
+    const resizeObserver = new ResizeObserver(() => {
+      // Debounce canvas re-render on resize
+      const timer = setTimeout(() => {
+        if (sourceImgRef.current?.complete) {
+          renderToCanvas();
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    });
+    
+    resizeObserver.observe(imageContainerRef.current);
+    return () => resizeObserver.disconnect();
+  }, [renderToCanvas]);
+
+  // Re-render canvas when edits change
+  useEffect(() => {
+    const updateCanvas = () => {
+      if (sourceImgRef.current && canvasElementRef.current) {
+        // If image is already loaded, render immediately
+        if (sourceImgRef.current.complete && sourceImgRef.current.naturalWidth > 0) {
+          renderToCanvas();
+        } else {
+          // Otherwise wait for image to load
+          sourceImgRef.current.onload = () => {
+            renderToCanvas();
+          };
+        }
+      }
+    };
+    
+    updateCanvas();
+  }, [image.backgroundType, image.background, image.cropArea, image.resizeWidth, image.resizeHeight, renderToCanvas]);
 
   // Calculate aspect ratio for container
   const getAspectRatio = () => {
@@ -281,15 +508,15 @@ function ImageItem({
       >
         <div 
           ref={imageContainerRef}
-          className="w-full h-full flex items-center justify-center relative bg-white"
+          className="w-full h-full relative"
         >
-          {/* Background layer - positioned behind image */}
-          {image.backgroundType && (
-            <div
-              className="absolute inset-0"
-              style={backgroundStyle}
-            />
-          )}
+          <canvas
+            ref={canvasElementRef}
+            className={cn(
+              "absolute inset-0 w-full h-full",
+              image.backgroundType === 'transparent' && "drop-shadow-lg"
+            )}
+          />
           {image.isProcessing && (
             <div 
               className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-80 z-20"
@@ -310,29 +537,13 @@ function ImageItem({
               <span className="text-xs text-red-600 font-medium text-center">{image.error}</span>
             </div>
           )}
+          {/* Hidden img for loading source image - use original file */}
           <img
-            ref={imgRef}
-            src={image.url}
+            ref={sourceImgRef}
             alt={image.file.name}
-            className={cn(
-              "relative z-10",
-              image.backgroundType === 'transparent' && "drop-shadow-lg"
-            )}
-            style={{
-              width: 'auto',
-              height: 'auto',
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain'
-            }}
-            loading="lazy"
+            className="hidden"
             onLoad={() => {
-              if (imgRef.current) {
-                setDimensions({
-                  width: imgRef.current.naturalWidth,
-                  height: imgRef.current.naturalHeight
-                });
-              }
+              renderToCanvas();
             }}
           />
           {image.isCustomCropActive && containerSize.width > 0 && (
@@ -502,46 +713,12 @@ function ImageItem({
   );
 }
 
-// Helper function to get background style
-const getBackgroundStyle = (image: UploadedImage): React.CSSProperties | undefined => {
-  if (!image.backgroundType) {
-    return undefined;
-  }
-
-  switch (image.backgroundType) {
-    case 'transparent':
-      return TRANSPARENT_CHECKERBOARD_PATTERN;
-    case 'color':
-      return { backgroundColor: image.background || '#E5E7EB' };
-    case 'texture':
-      return {
-        backgroundImage: `url(${image.background})`,
-        backgroundSize: '50%',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat'
-      };
-    case 'blur':
-      return {
-        backgroundImage: `url(${image.url})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        filter: 'blur(20px)',
-        transform: 'scale(1.1)'
-      };
-    default:
-      return undefined;
-  }
-};
-
 // Sidebar navigation items
 const SIDEBAR_NAV_ITEMS: SidebarNavItem[] = [
   { id: 'home', icon: Home, label: 'Home' },
   { id: 'background', icon: ImageIcon, label: 'Background' },
   { id: 'crop', icon: CropIcon, label: 'Crop' },
   { id: 'resize', icon: Maximize2, label: 'Resize' },
-  { id: 'compress', icon: Minimize2, label: 'Compress' },
-  { id: 'convert', icon: RefreshCw, label: 'Convert' },
-  { id: 'upscaler', icon: TrendingUp, label: 'Upscaler' },
 ];
 
 export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
@@ -550,6 +727,9 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
   const [images, setImages] = useState<UploadedImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [customCropMode, setCustomCropMode] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportType, setExportType] = useState<ExportType>(null);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
 
   // Cleanup blob URLs on unmount
   useEffect(() => {
@@ -564,6 +744,19 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
       });
     };
   }, []); // Only run on unmount
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setExportModalOpen(false);
+      }
+    };
+    if (exportModalOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [exportModalOpen]);
 
   const handleFileSelect = useCallback((files: FileList | null) => {
     if (!files) return;
@@ -795,7 +988,8 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                     error: undefined,
                     isCustomCropActive: false,
                     cropArea: undefined,
-                    cropPreviewAspectRatio: undefined
+                    cropPreviewAspectRatio: undefined,
+                    originalFile: img.originalFile || img.file // Preserve original file
                   } 
                 : img
             );
@@ -934,6 +1128,30 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
   }, []);
 
   const handleCustomCropApply = useCallback((imageId: string, cropArea: CropArea) => {
+    // Convert to numbers and validate crop area
+    const cropX = Number(cropArea?.x);
+    const cropY = Number(cropArea?.y);
+    const cropW = Number(cropArea?.width);
+    const cropH = Number(cropArea?.height);
+    
+    // Validate crop coordinates
+    if (!cropArea || 
+        !Number.isFinite(cropX) || !Number.isFinite(cropY) ||
+        !Number.isFinite(cropW) || !Number.isFinite(cropH) ||
+        isNaN(cropX) || isNaN(cropY) || isNaN(cropW) || isNaN(cropH) ||
+        cropW <= 0 || cropH <= 0 || cropX < 0 || cropY < 0) {
+      console.error('Invalid crop area in handleCustomCropApply:', { cropArea, cropX, cropY, cropW, cropH });
+      return;
+    }
+    
+    // Create validated crop area with explicit numbers
+    const validatedCropArea: CropArea = {
+      x: Number(cropX),
+      y: Number(cropY),
+      width: Number(cropW),
+      height: Number(cropH)
+    };
+    
     setCustomCropMode(false);
     setImages(prev => prev.map(img => 
       img.id === imageId 
@@ -941,8 +1159,8 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
         : img
     ));
     
-    // Apply the crop to this specific image
-    applyCropToImage(imageId, null, cropArea);
+    // Apply the crop to this specific image with validated crop area
+    applyCropToImage(imageId, null, validatedCropArea);
   }, [applyCropToImage]);
 
   const handleCustomCropCancel = useCallback(() => {
@@ -1485,6 +1703,177 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
     });
   }, [selectedImages]);
 
+  // Export function - exports from canvas
+  const exportImageToCanvas = useCallback((image: UploadedImage, format?: string, quality?: number, upscaleFactor?: number): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const container = document.querySelector(`[data-image-id="${image.id}"]`);
+      if (!container) {
+        reject(new Error('Canvas not found'));
+        return;
+      }
+      
+      const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+      if (!canvas) {
+        reject(new Error('Canvas element not found'));
+        return;
+      }
+
+      // If upscale, create a larger canvas
+      if (upscaleFactor && upscaleFactor > 1) {
+        const upscaledCanvas = document.createElement('canvas');
+        upscaledCanvas.width = canvas.width * upscaleFactor;
+        upscaledCanvas.height = canvas.height * upscaleFactor;
+        const ctx = upscaledCanvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+        ctx.drawImage(canvas, 0, 0, upscaledCanvas.width, upscaledCanvas.height);
+        upscaledCanvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create blob'));
+            }
+          },
+          format || 'image/png',
+          quality || 0.9
+        );
+      } else {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to create blob'));
+            }
+          },
+          format || 'image/png',
+          quality || 0.9
+        );
+      }
+    });
+  }, []);
+
+  // Download blob helper
+  const downloadBlob = useCallback((blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  // Regular export
+  const handleExport = useCallback(async () => {
+    const selected = images.filter(img => img.selected);
+    if (selected.length === 0) return;
+
+    for (const image of selected) {
+      try {
+        const blob = await exportImageToCanvas(image);
+        const extension = image.file.name.split('.').pop() || 'png';
+        const baseName = image.file.name.replace(/\.[^/.]+$/, '');
+        const filename = `${baseName}_exported.${extension}`;
+        downloadBlob(blob, filename);
+      } catch (error) {
+        console.error('Export failed:', error);
+      }
+    }
+  }, [images, exportImageToCanvas, downloadBlob]);
+
+  // Export with convert
+  const handleConvertExport = useCallback(async (format: ImageFormat, maintainQuality?: boolean) => {
+    const selected = images.filter(img => img.selected);
+    if (selected.length === 0) return;
+
+    const formatMap: Record<ImageFormat, string> = {
+      jpg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      bmp: 'image/bmp',
+      tiff: 'image/tiff'
+    };
+
+    for (const image of selected) {
+      try {
+        const blob = await exportImageToCanvas(image, formatMap[format], maintainQuality ? 0.95 : 0.85);
+        const extension = format === 'jpg' ? 'jpg' : format;
+        const baseName = image.file.name.replace(/\.[^/.]+$/, '');
+        const filename = `${baseName}_exported.${extension}`;
+        downloadBlob(blob, filename);
+      } catch (error) {
+        console.error('Convert export failed:', error);
+      }
+    }
+    setExportModalOpen(false);
+  }, [images, exportImageToCanvas, downloadBlob]);
+
+  // Export with compress
+  const handleCompressExport = useCallback(async (mode: 'quality' | 'size' | 'custom', quality?: number, targetSizeKB?: number, outputFormat?: 'original' | 'webp') => {
+    const selected = images.filter(img => img.selected);
+    if (selected.length === 0) return;
+
+    for (const image of selected) {
+      try {
+        let exportQuality = 0.8;
+        let exportFormat = 'image/jpeg';
+        
+        if (mode === 'quality') {
+          exportQuality = 0.7;
+        } else if (mode === 'custom' && quality !== undefined) {
+          exportQuality = quality / 100;
+        } else {
+          exportQuality = 0.6;
+        }
+
+        if (outputFormat === 'webp') {
+          exportFormat = 'image/webp';
+        } else {
+          exportFormat = image.file.type || 'image/jpeg';
+        }
+
+        const blob = await exportImageToCanvas(image, exportFormat, exportQuality);
+        const extension = outputFormat === 'webp' ? 'webp' : image.file.name.split('.').pop() || 'jpg';
+        const baseName = image.file.name.replace(/\.[^/.]+$/, '');
+        const filename = `${baseName}_exported.${extension}`;
+        downloadBlob(blob, filename);
+      } catch (error) {
+        console.error('Compress export failed:', error);
+      }
+    }
+    setExportModalOpen(false);
+  }, [images, exportImageToCanvas, downloadBlob]);
+
+  // Export with upscale
+  const handleUpscaleExport = useCallback(async (level: UpscaleLevel) => {
+    const selected = images.filter(img => img.selected);
+    if (selected.length === 0) return;
+
+    const factorMap: Record<UpscaleLevel, number> = {
+      '2x': 2,
+      '4x': 4,
+      '8x': 8
+    };
+
+    for (const image of selected) {
+      try {
+        const blob = await exportImageToCanvas(image, 'image/png', 0.95, factorMap[level]);
+        const baseName = image.file.name.replace(/\.[^/.]+$/, '');
+        const filename = `${baseName}_exported.png`;
+        downloadBlob(blob, filename);
+      } catch (error) {
+        console.error('Upscale export failed:', error);
+      }
+    }
+    setExportModalOpen(false);
+  }, [images, exportImageToCanvas, downloadBlob]);
+
   // Sidebar navigation handler
   const handleSectionChange = useCallback((section: SidebarSection) => {
     setActiveSection(section);
@@ -1616,28 +2005,6 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
             onPreviewResize={(w, h) => setResizePreview({ width: w, height: h })}
           />
         )}
-
-
-        {activeSection === 'compress' && (
-          <CompressPanel 
-            selectedImages={selectedImages}
-            onApplyCompress={applyCompressToSelected}
-          />
-        )}
-
-        {activeSection === 'convert' && (
-          <ConvertPanel 
-            selectedImages={selectedImages}
-            onApplyConvert={applyConvertToSelected}
-          />
-        )}
-
-        {activeSection === 'upscaler' && (
-          <UpscalerPanel 
-            selectedImages={selectedImages}
-            onApplyUpscale={applyUpscaleToSelected}
-          />
-        )}
       </div>
 
       {/* Main Canvas Area */}
@@ -1674,11 +2041,69 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
             <span className="text-xs font-medium">Reset changes</span>
           </button>
 
-          {selectedCount > 0 && (
-            <div className="ml-auto text-xs text-gray-600">
-              {selectedCount} image{selectedCount !== 1 ? 's' : ''} selected
+          <div className="ml-auto flex items-center gap-2">
+            {selectedCount > 0 && (
+              <div className="text-xs text-gray-600 mr-2">
+                {selectedCount} image{selectedCount !== 1 ? 's' : ''} selected
+              </div>
+            )}
+            
+            {/* Export Dropdown */}
+            <div className="relative" ref={exportDropdownRef}>
+              <button
+                onClick={() => setExportModalOpen(!exportModalOpen)}
+                disabled={selectedCount === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="Export options"
+              >
+                <Download className="w-4 h-4" aria-hidden="true" />
+                <span className="text-xs font-medium">Export</span>
+                <ChevronDown className="w-3 h-3" aria-hidden="true" />
+              </button>
+              
+              {exportModalOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[180px]">
+                  <button
+                    onClick={handleExport}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Export</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setExportType('convert');
+                      setExportModalOpen(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Convert & Export</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setExportType('compress');
+                      setExportModalOpen(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                  >
+                    <Minimize2 className="w-4 h-4" />
+                    <span>Compress & Export</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setExportType('upscale');
+                      setExportModalOpen(false);
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                  >
+                    <TrendingUp className="w-4 h-4" />
+                    <span>Upscale & Export</span>
+                  </button>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
 
         {/* Canvas */}
@@ -1727,7 +2152,6 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
               <ImageItem
                 key={image.id}
                 image={image}
-                backgroundStyle={getBackgroundStyle(image)}
                 onToggleSelection={toggleImageSelection}
                 onDelete={deleteImage}
                 onCustomCropApply={handleCustomCropApply}
@@ -1740,6 +2164,85 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
           </div>
         </div>
       </div>
+
+      {/* Export Modals */}
+      {exportType === 'convert' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div 
+            className="fixed inset-0 bg-black/50" 
+            onClick={() => setExportType(null)}
+          />
+          <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Convert & Export</h2>
+                <button
+                  onClick={() => setExportType(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <ConvertPanel
+                selectedImages={selectedImages}
+                onApplyConvert={handleConvertExport}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {exportType === 'compress' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div 
+            className="fixed inset-0 bg-black/50" 
+            onClick={() => setExportType(null)}
+          />
+          <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Compress & Export</h2>
+                <button
+                  onClick={() => setExportType(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <CompressPanel
+                selectedImages={selectedImages}
+                onApplyCompress={handleCompressExport}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {exportType === 'upscale' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div 
+            className="fixed inset-0 bg-black/50" 
+            onClick={() => setExportType(null)}
+          />
+          <div className="relative bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto m-4">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Upscale & Export</h2>
+                <button
+                  onClick={() => setExportType(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <UpscalerPanel
+                selectedImages={selectedImages}
+                onApplyUpscale={(level) => handleUpscaleExport(level)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

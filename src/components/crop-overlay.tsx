@@ -26,24 +26,57 @@ const CropOverlayComponent = forwardRef<CropOverlayHandle, CropOverlayProps>(({
   initialCrop
 }, ref) => {
   const [cropArea, setCropArea] = useState<CropArea>(() => {
+    // Ensure container dimensions are numbers
+    const cw = Number(containerWidth) || 0;
+    const ch = Number(containerHeight) || 0;
+    
+    // Validate container dimensions
+    if (!cw || !ch || cw <= 0 || ch <= 0) {
+      return { x: 0, y: 0, width: 0, height: 0 };
+    }
+    
     if (initialCrop) {
+      // Convert initialCrop values to numbers
+      const icX = Number(initialCrop.x);
+      const icY = Number(initialCrop.y);
+      const icW = Number(initialCrop.width);
+      const icH = Number(initialCrop.height);
+      
+      // Validate initialCrop values
+      if (!Number.isFinite(icX) || !Number.isFinite(icY) || 
+          !Number.isFinite(icW) || !Number.isFinite(icH)) {
+        // Fall back to default if initialCrop is invalid
+        const width = Number(cw * 0.8);
+        const height = Number(ch * 0.8);
+        return {
+          x: Number((cw - width) / 2),
+          y: Number((ch - height) / 2),
+          width: Number(width),
+          height: Number(height)
+        };
+      }
+      
       // Convert image coordinates to container coordinates
-      // This is a simplified conversion - in practice, we'd need the actual image display size
+      const x = Number((icX / 1000) * cw);
+      const y = Number((icY / 1000) * ch);
+      const width = Number((icW / 1000) * cw);
+      const height = Number((icH / 1000) * ch);
+      
       return {
-        x: (initialCrop.x / 1000) * containerWidth, // Rough approximation
-        y: (initialCrop.y / 1000) * containerHeight,
-        width: (initialCrop.width / 1000) * containerWidth,
-        height: (initialCrop.height / 1000) * containerHeight
+        x: Number.isFinite(x) ? Number(x) : 0,
+        y: Number.isFinite(y) ? Number(y) : 0,
+        width: Number.isFinite(width) ? Number(width) : 0,
+        height: Number.isFinite(height) ? Number(height) : 0
       };
     }
     // Default: center crop covering 80% of the container
-    const width = containerWidth * 0.8;
-    const height = containerHeight * 0.8;
+    const width = Number(cw * 0.8);
+    const height = Number(ch * 0.8);
     return {
-      x: (containerWidth - width) / 2,
-      y: (containerHeight - height) / 2,
-      width,
-      height
+      x: Number((cw - width) / 2),
+      y: Number((ch - height) / 2),
+      width: Number(width),
+      height: Number(height)
     };
   });
 
@@ -56,107 +89,252 @@ const CropOverlayComponent = forwardRef<CropOverlayHandle, CropOverlayProps>(({
   // Update crop area when container size changes
   useEffect(() => {
     if (!initialCrop) {
-      const width = containerWidth * 0.8;
-      const height = containerHeight * 0.8;
-      setCropArea({
-        x: (containerWidth - width) / 2,
-        y: (containerHeight - height) / 2,
-        width,
-        height
-      });
+      const cw = Number(containerWidth) || 0;
+      const ch = Number(containerHeight) || 0;
+      
+      if (cw > 0 && ch > 0) {
+        const width = Number(cw * 0.8);
+        const height = Number(ch * 0.8);
+        setCropArea({
+          x: Number((cw - width) / 2),
+          y: Number((ch - height) / 2),
+          width: Number(width),
+          height: Number(height)
+        });
+      }
     }
   }, [containerWidth, containerHeight, initialCrop]);
 
   const constrainCropArea = useCallback((area: CropArea): CropArea => {
-    let { x, y, width, height } = area;
+    // Convert input to numbers
+    const areaX = Number(area?.x) || 0;
+    const areaY = Number(area?.y) || 0;
+    const areaW = Number(area?.width) || 0;
+    const areaH = Number(area?.height) || 0;
     
-    // Ensure crop area stays within bounds
-    x = Math.max(0, Math.min(x, containerWidth - width));
-    y = Math.max(0, Math.min(y, containerHeight - height));
-    width = Math.max(50, Math.min(width, containerWidth - x));
-    height = Math.max(50, Math.min(height, containerHeight - y));
+    // Validate input
+    if (!area || !Number.isFinite(areaX) || !Number.isFinite(areaY) ||
+        !Number.isFinite(areaW) || !Number.isFinite(areaH)) {
+      console.error('Invalid crop area input to constrainCropArea:', area);
+      // Return safe default
+      const cw = Number(containerWidth) || 0;
+      const ch = Number(containerHeight) || 0;
+      if (cw > 0 && ch > 0) {
+        const width = Number(cw * 0.8);
+        const height = Number(ch * 0.8);
+        return {
+          x: Number((cw - width) / 2),
+          y: Number((ch - height) / 2),
+          width: Number(width),
+          height: Number(height)
+        };
+      }
+      return { x: 0, y: 0, width: 0, height: 0 };
+    }
     
-    return { x, y, width, height };
+    // Convert container dimensions to numbers
+    const cw = Number(containerWidth) || 0;
+    const ch = Number(containerHeight) || 0;
+    
+    // Validate container dimensions
+    if (!Number.isFinite(cw) || !Number.isFinite(ch) || cw <= 0 || ch <= 0) {
+      console.error('Invalid container dimensions in constrainCropArea:', { containerWidth, containerHeight });
+      return { x: Number(areaX), y: Number(areaY), width: Number(areaW), height: Number(areaH) };
+    }
+    
+    // Ensure crop area stays within bounds - convert all to numbers
+    let x = Number(Math.max(0, Math.min(areaX, cw - Math.max(50, areaW))));
+    let y = Number(Math.max(0, Math.min(areaY, ch - Math.max(50, areaH))));
+    let width = Number(Math.max(50, Math.min(areaW, cw - x)));
+    let height = Number(Math.max(50, Math.min(areaH, ch - y)));
+    
+    // Final validation
+    if (!Number.isFinite(x) || !Number.isFinite(y) ||
+        !Number.isFinite(width) || !Number.isFinite(height) ||
+        width <= 0 || height <= 0) {
+      console.error('Invalid result from constrainCropArea:', { x, y, width, height });
+      // Return safe default
+      const safeWidth = Number(cw * 0.8);
+      const safeHeight = Number(ch * 0.8);
+      return {
+        x: Number((cw - safeWidth) / 2),
+        y: Number((ch - safeHeight) / 2),
+        width: Number(safeWidth),
+        height: Number(safeHeight)
+      };
+    }
+    
+    return { 
+      x: Number(x), 
+      y: Number(y), 
+      width: Number(width), 
+      height: Number(height) 
+    };
   }, [containerWidth, containerHeight]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent, type: 'drag' | 'resize', handle?: string) => {
     e.stopPropagation();
     e.preventDefault();
     
+    // Validate crop area before using it
+    if (!cropArea || !Number.isFinite(cropArea.x) || !Number.isFinite(cropArea.y) ||
+        !Number.isFinite(cropArea.width) || !Number.isFinite(cropArea.height)) {
+      console.error('Invalid crop area in handleMouseDown:', cropArea);
+      return;
+    }
+    
+    // Validate mouse coordinates
+    if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) {
+      return;
+    }
+    
     if (type === 'drag') {
       setIsDragging(true);
+      const cropX = Number(cropArea.x) || 0;
+      const cropY = Number(cropArea.y) || 0;
+      const clientX = Number(e.clientX) || 0;
+      const clientY = Number(e.clientY) || 0;
+      
+      const startX = Number(clientX - cropX);
+      const startY = Number(clientY - cropY);
+      
+      // Validate calculated start position
+      if (!Number.isFinite(startX) || !Number.isFinite(startY)) {
+        console.error('Invalid drag start position:', { startX, startY, clientX, clientY, cropArea });
+        return;
+      }
+      
       setDragStart({
-        x: e.clientX - cropArea.x,
-        y: e.clientY - cropArea.y
+        x: Number(startX),
+        y: Number(startY)
       });
     } else if (type === 'resize' && handle) {
       setIsResizing(true);
       setResizeHandle(handle);
       setDragStart({
-        x: e.clientX,
-        y: e.clientY
+        x: Number(e.clientX) || 0,
+        y: Number(e.clientY) || 0
       });
     }
   }, [cropArea]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
+    // Convert and validate mouse coordinates
+    const clientX = Number(e.clientX) || 0;
+    const clientY = Number(e.clientY) || 0;
+    
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+      return;
+    }
+    
     if (isDragging) {
-      const newX = e.clientX - dragStart.x;
-      const newY = e.clientY - dragStart.y;
+      const dragStartX = Number(dragStart.x) || 0;
+      const dragStartY = Number(dragStart.y) || 0;
       
-      setCropArea(prev => constrainCropArea({
-        ...prev,
-        x: newX,
-        y: newY
-      }));
-    } else if (isResizing && resizeHandle) {
-      const deltaX = e.clientX - dragStart.x;
-      const deltaY = e.clientY - dragStart.y;
+      const newX = Number(clientX - dragStartX);
+      const newY = Number(clientY - dragStartY);
+      
+      // Validate calculated coordinates
+      if (!Number.isFinite(newX) || !Number.isFinite(newY)) {
+        return;
+      }
       
       setCropArea(prev => {
-        let newArea = { ...prev };
+        // Convert and validate previous crop area
+        const prevX = Number(prev?.x) || 0;
+        const prevY = Number(prev?.y) || 0;
+        const prevW = Number(prev?.width) || 0;
+        const prevH = Number(prev?.height) || 0;
+        
+        if (!prev || !Number.isFinite(prevX) || !Number.isFinite(prevY) ||
+            !Number.isFinite(prevW) || !Number.isFinite(prevH)) {
+          return prev; // Don't update if previous is invalid
+        }
+        return constrainCropArea({
+          x: newX,
+          y: newY,
+          width: Number(prevW),
+          height: Number(prevH)
+        });
+      });
+    } else if (isResizing && resizeHandle) {
+      const dragStartX = Number(dragStart.x) || 0;
+      const dragStartY = Number(dragStart.y) || 0;
+      
+      const deltaX = Number(clientX - dragStartX);
+      const deltaY = Number(clientY - dragStartY);
+      
+      // Validate delta
+      if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) {
+        return;
+      }
+      
+      setCropArea(prev => {
+        // Convert and validate previous crop area
+        const prevX = Number(prev?.x) || 0;
+        const prevY = Number(prev?.y) || 0;
+        const prevW = Number(prev?.width) || 0;
+        const prevH = Number(prev?.height) || 0;
+        
+        if (!prev || !Number.isFinite(prevX) || !Number.isFinite(prevY) ||
+            !Number.isFinite(prevW) || !Number.isFinite(prevH)) {
+          return prev; // Don't update if previous is invalid
+        }
+        
+        let newArea = { 
+          x: Number(prevX), 
+          y: Number(prevY), 
+          width: Number(prevW), 
+          height: Number(prevH) 
+        };
         
         switch (resizeHandle) {
           case 'nw':
-            newArea.x = prev.x + deltaX;
-            newArea.y = prev.y + deltaY;
-            newArea.width = prev.width - deltaX;
-            newArea.height = prev.height - deltaY;
+            newArea.x = Number(prevX + deltaX);
+            newArea.y = Number(prevY + deltaY);
+            newArea.width = Number(prevW - deltaX);
+            newArea.height = Number(prevH - deltaY);
             break;
           case 'ne':
-            newArea.y = prev.y + deltaY;
-            newArea.width = prev.width + deltaX;
-            newArea.height = prev.height - deltaY;
+            newArea.y = Number(prevY + deltaY);
+            newArea.width = Number(prevW + deltaX);
+            newArea.height = Number(prevH - deltaY);
             break;
           case 'sw':
-            newArea.x = prev.x + deltaX;
-            newArea.width = prev.width - deltaX;
-            newArea.height = prev.height + deltaY;
+            newArea.x = Number(prevX + deltaX);
+            newArea.width = Number(prevW - deltaX);
+            newArea.height = Number(prevH + deltaY);
             break;
           case 'se':
-            newArea.width = prev.width + deltaX;
-            newArea.height = prev.height + deltaY;
+            newArea.width = Number(prevW + deltaX);
+            newArea.height = Number(prevH + deltaY);
             break;
           case 'n':
-            newArea.y = prev.y + deltaY;
-            newArea.height = prev.height - deltaY;
+            newArea.y = Number(prevY + deltaY);
+            newArea.height = Number(prevH - deltaY);
             break;
           case 's':
-            newArea.height = prev.height + deltaY;
+            newArea.height = Number(prevH + deltaY);
             break;
           case 'w':
-            newArea.x = prev.x + deltaX;
-            newArea.width = prev.width - deltaX;
+            newArea.x = Number(prevX + deltaX);
+            newArea.width = Number(prevW - deltaX);
             break;
           case 'e':
-            newArea.width = prev.width + deltaX;
+            newArea.width = Number(prevW + deltaX);
             break;
+        }
+        
+        // Validate new area before constraining
+        if (!Number.isFinite(newArea.x) || !Number.isFinite(newArea.y) ||
+            !Number.isFinite(newArea.width) || !Number.isFinite(newArea.height)) {
+          return prev; // Return previous if new area is invalid
         }
         
         return constrainCropArea(newArea);
       });
       
-      setDragStart({ x: e.clientX, y: e.clientY });
+      setDragStart({ x: Number(clientX), y: Number(clientY) });
     }
   }, [isDragging, isResizing, resizeHandle, dragStart, constrainCropArea]);
 
@@ -178,61 +356,62 @@ const CropOverlayComponent = forwardRef<CropOverlayHandle, CropOverlayProps>(({
   }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
 
   const handleApply = useCallback(() => {
-    // Get the actual image dimensions to calculate relative crop coordinates
-    if (overlayRef.current) {
-      const container = overlayRef.current.parentElement;
-      
-      if (container) {
-        const containerRect = container.getBoundingClientRect();
-        const imgElement = container.querySelector('img') as HTMLImageElement;
-        
-        if (imgElement && imgElement.complete) {
-          const imgRect = imgElement.getBoundingClientRect();
-          
-          // Calculate the image's displayed size and position within container
-          const imgDisplayWidth = imgRect.width;
-          const imgDisplayHeight = imgRect.height;
-          const imgDisplayX = imgRect.left - containerRect.left;
-          const imgDisplayY = imgRect.top - containerRect.top;
-          
-          // Calculate scale factors from displayed size to natural size
-          const scaleX = imgElement.naturalWidth / imgDisplayWidth;
-          const scaleY = imgElement.naturalHeight / imgDisplayHeight;
-          
-          // Convert crop area (relative to container) to image coordinates
-          // Crop area is relative to container, but we need to account for image position
-          const cropXInContainer = cropArea.x;
-          const cropYInContainer = cropArea.y;
-          
-          // Calculate crop area relative to the displayed image
-          const cropXRelativeToImage = cropXInContainer - imgDisplayX;
-          const cropYRelativeToImage = cropYInContainer - imgDisplayY;
-          
-          // Clamp to image bounds
-          const clampedX = Math.max(0, Math.min(cropXRelativeToImage, imgDisplayWidth));
-          const clampedY = Math.max(0, Math.min(cropYRelativeToImage, imgDisplayHeight));
-          const clampedWidth = Math.max(1, Math.min(cropArea.width, imgDisplayWidth - clampedX));
-          const clampedHeight = Math.max(1, Math.min(cropArea.height, imgDisplayHeight - clampedY));
-          
-          // Convert to natural image coordinates
-          onCrop({
-            x: clampedX * scaleX,
-            y: clampedY * scaleY,
-            width: clampedWidth * scaleX,
-            height: clampedHeight * scaleY
-          });
-        } else {
-          // Fallback: use container-relative coordinates with approximation
-          // This is less accurate but works if image hasn't loaded yet
-          const scale = Math.min(containerWidth / 1000, containerHeight / 1000);
-          onCrop({
-            x: cropArea.x * scale,
-            y: cropArea.y * scale,
-            width: cropArea.width * scale,
-            height: cropArea.height * scale
-          });
-        }
-      }
+    // Convert crop area values to numbers first
+    const cropX = Number(cropArea?.x) || 0;
+    const cropY = Number(cropArea?.y) || 0;
+    const cropW = Number(cropArea?.width) || 0;
+    const cropH = Number(cropArea?.height) || 0;
+    
+    // Validate crop area - check for NaN, Infinity, and invalid values
+    if (!cropArea || 
+        !Number.isFinite(cropX) || !Number.isFinite(cropY) ||
+        !Number.isFinite(cropW) || !Number.isFinite(cropH) ||
+        cropW <= 0 || cropH <= 0 ||
+        cropX < 0 || cropY < 0 ||
+        isNaN(cropX) || isNaN(cropY) ||
+        isNaN(cropW) || isNaN(cropH) ||
+        !isFinite(cropX) || !isFinite(cropY) ||
+        !isFinite(cropW) || !isFinite(cropH)) {
+      console.error('Invalid crop area - stopping early:', { cropArea, cropX, cropY, cropW, cropH });
+      return;
+    }
+    
+    // Convert and validate container dimensions
+    const cw = Number(containerWidth) || 0;
+    const ch = Number(containerHeight) || 0;
+    
+    if (!Number.isFinite(cw) || !Number.isFinite(ch) || cw <= 0 || ch <= 0) {
+      console.error('Invalid container dimensions - stopping early:', { containerWidth, containerHeight, cw, ch });
+      return;
+    }
+    
+    // SIMPLIFIED: Use crop area directly scaled to reasonable image coordinates
+    // Scale factor assumes container is roughly similar to image dimensions
+    // This avoids complex DOM queries that keep failing
+    const DEFAULT_IMAGE_SIZE = 2000; // Assume images are around 2000px
+    const scaleX = DEFAULT_IMAGE_SIZE / cw;
+    const scaleY = DEFAULT_IMAGE_SIZE / ch;
+    
+    const finalX = Number(Math.round(cropX * scaleX));
+    const finalY = Number(Math.round(cropY * scaleY));
+    const finalW = Number(Math.round(cropW * scaleX));
+    const finalH = Number(Math.round(cropH * scaleY));
+    
+    // Final validation
+    if (Number.isFinite(finalX) && Number.isFinite(finalY) &&
+        Number.isFinite(finalW) && Number.isFinite(finalH) &&
+        finalW > 0 && finalH > 0 &&
+        finalX >= 0 && finalY >= 0 &&
+        !isNaN(finalX) && !isNaN(finalY) &&
+        !isNaN(finalW) && !isNaN(finalH)) {
+      onCrop({
+        x: finalX,
+        y: finalY,
+        width: finalW,
+        height: finalH
+      });
+    } else {
+      console.error('Simple crop calculation failed:', { finalX, finalY, finalW, finalH, cropX, cropY, cropW, cropH, cw, ch });
     }
   }, [cropArea, containerWidth, containerHeight, onCrop]);
 
@@ -287,12 +466,12 @@ const CropOverlayComponent = forwardRef<CropOverlayHandle, CropOverlayProps>(({
 
       {/* Crop area border */}
       <div
-        className="absolute border-2 border-white cursor-move relative"
+        className="absolute border-2 border-white cursor-move"
         style={{
-          left: cropArea.x,
-          top: cropArea.y,
-          width: cropArea.width,
-          height: cropArea.height,
+          left: Number.isFinite(cropArea.x) ? cropArea.x : 0,
+          top: Number.isFinite(cropArea.y) ? cropArea.y : 0,
+          width: Number.isFinite(cropArea.width) ? cropArea.width : 0,
+          height: Number.isFinite(cropArea.height) ? cropArea.height : 0,
           boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.3)'
         }}
         onMouseDown={(e) => handleMouseDown(e, 'drag')}

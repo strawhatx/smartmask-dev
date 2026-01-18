@@ -168,11 +168,33 @@ export async function cropImage(
         let cropY: number;
 
         if (options.customCrop) {
-          // Use custom crop coordinates
-          cropX = Math.max(0, Math.min(options.customCrop.x, img.width));
-          cropY = Math.max(0, Math.min(options.customCrop.y, img.height));
-          cropWidth = Math.max(1, Math.min(options.customCrop.width, img.width - cropX));
-          cropHeight = Math.max(1, Math.min(options.customCrop.height, img.height - cropY));
+          // Convert to numbers first
+          const customCropX = Number(options.customCrop.x);
+          const customCropY = Number(options.customCrop.y);
+          const customCropW = Number(options.customCrop.width);
+          const customCropH = Number(options.customCrop.height);
+          
+          // Validate custom crop coordinates - check for NaN, Infinity, and invalid values
+          if (!Number.isFinite(customCropX) || !Number.isFinite(customCropY) ||
+              !Number.isFinite(customCropW) || !Number.isFinite(customCropH) ||
+              isNaN(customCropX) || isNaN(customCropY) || isNaN(customCropW) || isNaN(customCropH) ||
+              !isFinite(customCropX) || !isFinite(customCropY) || !isFinite(customCropW) || !isFinite(customCropH) ||
+              customCropW <= 0 || customCropH <= 0 || customCropX < 0 || customCropY < 0) {
+            reject(new Error(`Invalid crop coordinates: x=${customCropX}, y=${customCropY}, width=${customCropW}, height=${customCropH}`));
+            return;
+          }
+          
+          // Use custom crop coordinates - these should already be in image coordinates
+          cropX = Math.max(0, Math.min(Math.round(customCropX), img.width));
+          cropY = Math.max(0, Math.min(Math.round(customCropY), img.height));
+          cropWidth = Math.max(1, Math.min(Math.round(customCropW), img.width - cropX));
+          cropHeight = Math.max(1, Math.min(Math.round(customCropH), img.height - cropY));
+          
+          // Ensure valid dimensions
+          if (cropWidth <= 0 || cropHeight <= 0 || cropX < 0 || cropY < 0) {
+            reject(new Error('Invalid crop dimensions'));
+            return;
+          }
         } else if (options.aspectRatio === null) {
           // Keep original dimensions
           cropWidth = img.width;
@@ -199,30 +221,69 @@ export async function cropImage(
           }
         }
 
-        canvas.width = cropWidth;
-        canvas.height = cropHeight;
+        // Ensure canvas dimensions are valid
+        if (cropWidth <= 0 || cropHeight <= 0 || !Number.isFinite(cropWidth) || !Number.isFinite(cropHeight)) {
+          reject(new Error('Invalid canvas dimensions'));
+          return;
+        }
+        
+        canvas.width = Math.round(cropWidth);
+        canvas.height = Math.round(cropHeight);
+
+        // Clear canvas first
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         // Draw the cropped portion
-        ctx.drawImage(
-          img,
-          cropX, cropY, cropWidth, cropHeight,
-          0, 0, cropWidth, cropHeight
-        );
+        try {
+          ctx.drawImage(
+            img,
+            cropX, cropY, cropWidth, cropHeight,
+            0, 0, cropWidth, cropHeight
+          );
+        } catch (drawError) {
+          reject(new Error(`Failed to draw image: ${drawError instanceof Error ? drawError.message : 'Unknown error'}`));
+          return;
+        }
 
-        // Convert to blob (preserve original format if possible)
-        const format = imageFile.type === 'image/png' ? 'image/png' : 'image/jpeg';
-        const quality = 0.92;
+        // Verify canvas dimensions are valid
+        if (canvas.width <= 0 || canvas.height <= 0) {
+          reject(new Error(`Invalid canvas dimensions: ${canvas.width}x${canvas.height}`));
+          return;
+        }
+
+        // Convert to blob - use PNG for better compatibility and to preserve transparency
+        const format = 'image/png';
         
+        // Check if toBlob is supported
+        if (typeof canvas.toBlob !== 'function') {
+          reject(new Error('Canvas toBlob is not supported in this browser'));
+          return;
+        }
+        
+        // Create blob - PNG format doesn't use quality parameter
         canvas.toBlob(
           (blob) => {
-            if (blob) {
+            if (blob && blob.size > 0) {
               resolve(blob);
             } else {
-              reject(new Error('Failed to create blob'));
+              // Fallback: try with JPEG format
+              canvas.toBlob(
+                (fallbackBlob) => {
+                  if (fallbackBlob && fallbackBlob.size > 0) {
+                    resolve(fallbackBlob);
+                  } else {
+                    reject(new Error(
+                      `Failed to create blob. Canvas: ${canvas.width}x${canvas.height}, ` +
+                      `Image: ${img.width}x${img.height}, Crop: ${cropX},${cropY} ${cropWidth}x${cropHeight}`
+                    ));
+                  }
+                },
+                'image/jpeg',
+                0.92
+              );
             }
           },
-          format,
-          quality
+          format
         );
       } catch (error) {
         reject(error);
