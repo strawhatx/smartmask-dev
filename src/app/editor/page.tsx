@@ -76,7 +76,7 @@ const generateImageId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
-// Helper function to resize image
+// Helper function to resize image - stretches to exact dimensions (no aspect ratio preservation)
 async function resizeImageFile(imageFile: File, width: number, height: number): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -90,35 +90,12 @@ async function resizeImageFile(imageFile: File, width: number, height: number): 
           return;
         }
 
+        // Set canvas to exact dimensions
         canvas.width = width;
         canvas.height = height;
 
-        // Calculate aspect ratios
-        const imageAspectRatio = img.width / img.height;
-        const targetAspectRatio = width / height;
-
-        let drawWidth: number;
-        let drawHeight: number;
-        let offsetX: number;
-        let offsetY: number;
-
-        // Maintain aspect ratio and center the image
-        if (imageAspectRatio > targetAspectRatio) {
-          // Image is wider - fit to width
-          drawWidth = width;
-          drawHeight = width / imageAspectRatio;
-          offsetX = 0;
-          offsetY = (height - drawHeight) / 2;
-        } else {
-          // Image is taller - fit to height
-          drawHeight = height;
-          drawWidth = height * imageAspectRatio;
-          offsetX = (width - drawWidth) / 2;
-          offsetY = 0;
-        }
-
-        // Draw the image centered (canvas background is transparent by default)
-        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+        // Stretch image to fill entire canvas (exact dimensions, no aspect ratio preservation)
+        ctx.drawImage(img, 0, 0, width, height);
 
         // Convert to PNG to preserve transparency
         canvas.toBlob(
@@ -377,10 +354,22 @@ function ImageItem({
       return;
     }
     
-    // Get container dimensions for canvas pixel size
-    const containerRect = container.getBoundingClientRect();
-    const canvasWidth = containerRect.width;
-    const canvasHeight = containerRect.height;
+    // Determine canvas dimensions
+    // If resize dimensions are set, use those (actual pixel dimensions)
+    // Otherwise, use container dimensions for display
+    let canvasWidth: number;
+    let canvasHeight: number;
+    
+    if (image.resizeWidth && image.resizeHeight) {
+      // Use actual resize dimensions
+      canvasWidth = image.resizeWidth;
+      canvasHeight = image.resizeHeight;
+    } else {
+      // Use container dimensions for display
+      const containerRect = container.getBoundingClientRect();
+      canvasWidth = containerRect.width;
+      canvasHeight = containerRect.height;
+    }
     
     if (canvasWidth === 0 || canvasHeight === 0) {
       return;
@@ -398,9 +387,32 @@ function ImageItem({
     // Don't apply cropArea here - if crop was applied, the file is already cropped
     // cropArea is only for preview/overlay display, not for canvas rendering
     
-    // Set canvas pixel dimensions to match container (this clears the canvas automatically)
+    // Set canvas pixel dimensions (this clears the canvas automatically)
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
+    
+    // If resize dimensions are set, we need to scale the canvas display size to fit container
+    // But keep the pixel dimensions at the resize size
+    if (image.resizeWidth && image.resizeHeight) {
+      const containerRect = container.getBoundingClientRect();
+      const resizeAspectRatio = image.resizeWidth / image.resizeHeight;
+      const containerAspectRatio = containerRect.width / containerRect.height;
+      
+      // Scale canvas CSS to fit container while maintaining aspect ratio
+      if (resizeAspectRatio > containerAspectRatio) {
+        // Resize is wider - fit to container width
+        canvas.style.width = `${containerRect.width}px`;
+        canvas.style.height = `${containerRect.width / resizeAspectRatio}px`;
+      } else {
+        // Resize is taller - fit to container height
+        canvas.style.width = `${containerRect.height * resizeAspectRatio}px`;
+        canvas.style.height = `${containerRect.height}px`;
+      }
+    } else {
+      // No resize - fill container
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+    }
     
     // Get fresh context after resizing (setting width/height resets context)
     const context = canvas.getContext('2d');
@@ -436,8 +448,14 @@ function ImageItem({
               texCtx.fillRect(0, 0, canvas.width, canvas.height);
             }
             
-            // Draw image with contain logic
-            drawImageContained(texCtx, img, sourceX, sourceY, sourceWidth, sourceHeight, canvas.width, canvas.height);
+            // Draw image - if resize is applied, stretch to fill canvas; otherwise use contain logic
+            if (image.resizeWidth && image.resizeHeight) {
+              // Resize is applied - stretch image to fill entire canvas (exact dimensions)
+              texCtx.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+            } else {
+              // No resize - use contain logic
+              drawImageContained(texCtx, img, sourceX, sourceY, sourceWidth, sourceHeight, canvas.width, canvas.height);
+            }
           };
           textureImg.src = image.background;
           return; // Texture handles drawing in onload
@@ -447,24 +465,24 @@ function ImageItem({
       }
     }
     
-    // Draw image with contain logic (scale to fit, center it)
-    // This ensures background is visible around the image
-    if (image.backgroundType !== 'texture') {
-      drawImageContained(context, img, sourceX, sourceY, sourceWidth, sourceHeight, canvas.width, canvas.height);
-    }
-    
-    // Update dimensions for display (use resize if specified, otherwise use crop or original)
-    let displayWidth = sourceWidth;
-    let displayHeight = sourceHeight;
-    
+    // Draw image - if resize is applied, stretch to fill canvas; otherwise use contain logic
     if (image.resizeWidth && image.resizeHeight) {
-      displayWidth = image.resizeWidth;
-      displayHeight = image.resizeHeight;
+      // Resize is applied - stretch image to fill entire canvas (exact dimensions)
+      context.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+    } else {
+      // No resize - use contain logic (scale to fit, center it)
+      // This ensures background is visible around the image
+      if (image.backgroundType !== 'texture') {
+        drawImageContained(context, img, sourceX, sourceY, sourceWidth, sourceHeight, canvas.width, canvas.height);
+      }
     }
     
+    // Update dimensions for display
+    // Always use the actual source image dimensions (not resize dimensions for display calculation)
+    // Resize dimensions will be shown in the label separately
     setDimensions({
-      width: displayWidth,
-      height: displayHeight
+      width: sourceWidth,
+      height: sourceHeight
     });
   }, [image.cropArea, image.resizeWidth, image.resizeHeight, image.backgroundType, image.background, drawImageContained]);
   
@@ -724,12 +742,12 @@ function ImageItem({
               </div>
             )}
             {image.isCompressed && (
-              <div className="px-2 py-0.5 bg-green-600 text-white text-[10px] font-semibold rounded-md">
+              <div className="px-2 py-0.5 bg-blue-600 text-white text-[10px] font-semibold rounded-md">
                 Compressed
               </div>
             )}
             {image.isUpscaled && (
-              <div className="px-2 py-0.5 bg-purple-600 text-white text-[10px] font-semibold rounded-md">
+              <div className="px-2 py-0.5 bg-blue-600 text-white text-[10px] font-semibold rounded-md">
                 Upscaled
               </div>
             )}
@@ -790,16 +808,29 @@ function ImageItem({
       </div>
 
       {/* Dimension Label - Below Image */}
-      {(dimensions.width > 0 && dimensions.height > 0) && (
-        <div className="mt-2 px-3 py-1.5 bg-gray-800 bg-opacity-75 rounded-lg flex items-center justify-center">
-          <span className="text-white text-sm font-medium">
-            {image.resizeWidth && image.resizeHeight
-              ? `${image.originalWidth || dimensions.width} x ${image.originalHeight || dimensions.height} → ${image.resizeWidth} x ${image.resizeHeight}`
-              : `${dimensions.width} x ${dimensions.height}`
-            }
-          </span>
-        </div>
-      )}
+      {(() => {
+        // Calculate dimensions to display
+        let displayText = '';
+        if (image.resizeWidth && image.resizeHeight) {
+          // Show: original → new
+          const origW = image.originalWidth || sourceImgRef.current?.naturalWidth || 0;
+          const origH = image.originalHeight || sourceImgRef.current?.naturalHeight || 0;
+          displayText = `${origW} x ${origH} → ${image.resizeWidth} x ${image.resizeHeight}`;
+        } else {
+          // Show current dimensions
+          const currentW = dimensions.width || sourceImgRef.current?.naturalWidth || 0;
+          const currentH = dimensions.height || sourceImgRef.current?.naturalHeight || 0;
+          displayText = `${currentW} x ${currentH}`;
+        }
+        
+        return (displayText && displayText !== '0 x 0') ? (
+          <div className="mt-2 px-3 py-1.5 bg-gray-800 bg-opacity-75 rounded-lg flex items-center justify-center">
+            <span className="text-white text-sm font-medium">
+              {displayText}
+            </span>
+          </div>
+        ) : null;
+      })()}
 
       {/* Crop Control Buttons - Below Image */}
       {image.cropPreviewAspectRatio !== undefined && (
@@ -1665,8 +1696,9 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                         processedUrl: undefined,
                         isProcessing: false,
                         error: undefined,
-                        originalWidth: originalDimensions.width,
-                        originalHeight: originalDimensions.height,
+                        // Preserve original dimensions if they exist, otherwise use current dimensions
+                        originalWidth: img.originalWidth || originalDimensions.width,
+                        originalHeight: img.originalHeight || originalDimensions.height,
                         resizeWidth: width,
                         resizeHeight: height
                       } 
@@ -2174,7 +2206,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                 "flex flex-col items-center gap-1 px-2 py-2 rounded-lg transition-all w-16",
                 isActive
                   ? "bg-blue-50 text-blue-600" 
-                  : "text-gray-600 hover:bg-gray-50"
+                  : "text-gray-700 hover:bg-gray-50"
               )}
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}
@@ -2291,7 +2323,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
           <button
             onClick={deleteSelected}
             disabled={selectedCount === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-gray-700 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label={`Delete ${selectedCount} selected image${selectedCount !== 1 ? 's' : ''}`}
           >
             <Trash2 className="w-4 h-4" aria-hidden="true" />
@@ -2332,7 +2364,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                 <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-[180px]">
                   <button
                     onClick={handleExport}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
                   >
                     <Download className="w-4 h-4" />
                     <span>Export</span>
@@ -2342,7 +2374,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                       setExportType('convert');
                       setExportModalOpen(false);
                     }}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
                   >
                     <RefreshCw className="w-4 h-4" />
                     <span>Convert & Export</span>
@@ -2352,7 +2384,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                       setExportType('compress');
                       setExportModalOpen(false);
                     }}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
                   >
                     <Minimize2 className="w-4 h-4" />
                     <span>Compress & Export</span>
@@ -2362,7 +2394,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                       setExportType('upscale');
                       setExportModalOpen(false);
                     }}
-                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2"
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
                   >
                     <TrendingUp className="w-4 h-4" />
                     <span>Upscale & Export</span>
@@ -2406,7 +2438,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                   <p className="text-[10px] text-gray-600 font-medium mb-1">
                     or add from your device
                   </p>
-                  <div className="inline-flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-semibold rounded-full">
+                  <div className="inline-flex items-center gap-1 px-3 py-1 bg-blue-600 text-white text-[10px] font-semibold rounded-full">
                     <Upload className="w-3 h-3" aria-hidden="true" />
                     Upload
                   </div>
