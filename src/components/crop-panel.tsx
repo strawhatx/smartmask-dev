@@ -4,7 +4,7 @@ import { RotateCw, ChevronLeft } from 'lucide-react';
 
 interface CropPanelProps {
   selectedImages: Array<{ id: string; file: File; url: string; selected: boolean }>;
-  onApplyCrop?: (aspectRatio: number | null) => void | Promise<void>;
+  onApplyCrop?: (aspectRatio: number | null, targetWidth?: number, targetHeight?: number) => void | Promise<void>;
   onRotate?: (direction: '90' | '-90' | '180') => void | Promise<void>;
   onFlip?: (direction: 'horizontal' | 'vertical') => void | Promise<void>;
   onCustomCrop?: () => void;
@@ -15,26 +15,28 @@ interface AspectRatioPreset {
   id: string;
   name: string;
   ratio: number | null; // null for "Original"
+  width?: number; // Fixed width for specific dimensions
+  height?: number; // Fixed height for specific dimensions
   icon?: string;
 }
 
 const aspectRatioPresets: AspectRatioPreset[] = [
   { id: 'custom', name: 'Custom', ratio: null },
   { id: 'original', name: 'Original', ratio: null },
-  { id: 'square', name: 'Square', ratio: 1 },
-  { id: 'landscape', name: 'Landscape', ratio: 16 / 9 },
-  { id: 'portrait', name: 'Portrait', ratio: 9 / 16 },
-  { id: 'ig-story', name: 'IG Story', ratio: 9 / 16 },
-  { id: 'ig-post', name: 'IG Post', ratio: 1 },
-  { id: 'ig-reel', name: 'IG Reel', ratio: 9 / 16 },
-  { id: 'tiktok', name: 'TikTok Post', ratio: 9 / 16 },
-  { id: 'ebay', name: 'Ebay', ratio: 1 },
-  { id: 'etsy', name: 'Etsy', ratio: 1 },
-  { id: 'fb-shop', name: 'FB Shop', ratio: 1 },
-  { id: 'amazon', name: 'Amazon', ratio: 1 },
-  { id: 'poshmark', name: 'Poshmark', ratio: 3 / 4 },
-  { id: 'depop', name: 'Depop', ratio: 4 / 5 },
-  { id: 'mercari', name: 'Mercari', ratio: 1 }
+  { id: 'square', name: 'Square', ratio: 1, width: 1080, height: 1080 },
+  { id: 'landscape', name: 'Landscape', ratio: 16 / 9, width: 1080, height: 608 }, // 1080 / (16/9) = 607.5, rounded to 608
+  { id: 'portrait', name: 'Portrait', ratio: 9 / 16, width: 1080, height: 1920 }, // 1080 / (9/16) = 1920
+  { id: 'ig-story', name: 'IG Story', ratio: 9 / 16, width: 1080, height: 1920 },
+  { id: 'ig-post', name: 'IG Post', ratio: 1, width: 1080, height: 1080 },
+  { id: 'ig-reel', name: 'IG Reel', ratio: 9 / 16, width: 1080, height: 1920 },
+  { id: 'tiktok', name: 'TikTok Post', ratio: 9 / 16, width: 1080, height: 1920 },
+  { id: 'ebay', name: 'Ebay', ratio: 1, width: 1080, height: 1080 },
+  { id: 'etsy', name: 'Etsy', ratio: 1, width: 1080, height: 1080 },
+  { id: 'fb-shop', name: 'FB Shop', ratio: 1, width: 1080, height: 1080 },
+  { id: 'amazon', name: 'Amazon', ratio: 1, width: 1080, height: 1080 },
+  { id: 'poshmark', name: 'Poshmark', ratio: 3 / 4, width: 1080, height: 1440 }, // 1080 / (3/4) = 1440
+  { id: 'depop', name: 'Depop', ratio: 4 / 5, width: 1080, height: 1350 }, // 1080 / (4/5) = 1350
+  { id: 'mercari', name: 'Mercari', ratio: 1, width: 1080, height: 1080 }
 ];
 
 export function CropPanel({ selectedImages, onApplyCrop, onRotate, onFlip, onCustomCrop, customCropActive }: CropPanelProps) {
@@ -55,7 +57,8 @@ export function CropPanel({ selectedImages, onApplyCrop, onRotate, onFlip, onCus
       // Apply preset crop
       const preset = aspectRatioPresets.find(p => p.id === presetId);
       if (preset && onApplyCrop) {
-        onApplyCrop(preset.ratio);
+        // Pass aspect ratio and target dimensions if specified
+        onApplyCrop(preset.ratio, preset.width, preset.height);
       }
     }
   };

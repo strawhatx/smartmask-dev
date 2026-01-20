@@ -40,6 +40,8 @@ export interface UploadedImage {
   cropArea?: CropArea;
   isCustomCropActive?: boolean;
   cropPreviewAspectRatio?: number | null;
+  cropPreviewWidth?: number;
+  cropPreviewHeight?: number;
   originalWidth?: number;
   originalHeight?: number;
   resizeWidth?: number;
@@ -124,7 +126,7 @@ interface ImageItemProps {
   onToggleSelection: (id: string) => void;
   onDelete: (id: string) => void;
   onCustomCropCancel: () => void;
-  onApplyCropToImage: (imageId: string, aspectRatio: number | null, customCrop?: CropArea) => void;
+  onApplyCropToImage: (imageId: string, aspectRatio: number | null, customCrop?: CropArea, targetWidth?: number, targetHeight?: number) => void;
   onSetImages: React.Dispatch<React.SetStateAction<UploadedImage[]>>;
   resizePreview?: { width: number | null; height: number | null };
 }
@@ -813,8 +815,9 @@ function ImageItem({
         let displayText = '';
         if (image.resizeWidth && image.resizeHeight) {
           // Show: original → new
-          const origW = image.originalWidth || sourceImgRef.current?.naturalWidth || 0;
-          const origH = image.originalHeight || sourceImgRef.current?.naturalHeight || 0;
+          // Use originalWidth/Height from state (set during resize), fallback to current natural dimensions only if not set
+          const origW = image.originalWidth ?? dimensions.width ?? sourceImgRef.current?.naturalWidth ?? 0;
+          const origH = image.originalHeight ?? dimensions.height ?? sourceImgRef.current?.naturalHeight ?? 0;
           displayText = `${origW} x ${origH} → ${image.resizeWidth} x ${image.resizeHeight}`;
         } else {
           // Show current dimensions
@@ -839,18 +842,18 @@ function ImageItem({
             onClick={() => {
               if (image.cropPreviewAspectRatio !== undefined && image.cropArea) {
                 // Apply preset crop with custom position/size
-                onApplyCropToImage(image.id, image.cropPreviewAspectRatio, image.cropArea);
+                onApplyCropToImage(image.id, image.cropPreviewAspectRatio, image.cropArea, image.cropPreviewWidth, image.cropPreviewHeight);
                 onSetImages(prev => prev.map(img => 
                   img.id === image.id 
-                    ? { ...img, cropPreviewAspectRatio: undefined, cropArea: undefined } 
+                    ? { ...img, cropPreviewAspectRatio: undefined, cropPreviewWidth: undefined, cropPreviewHeight: undefined, cropArea: undefined } 
                     : img
                 ));
               } else if (image.cropPreviewAspectRatio !== undefined) {
                 // Apply preset crop with default position
-                onApplyCropToImage(image.id, image.cropPreviewAspectRatio);
+                onApplyCropToImage(image.id, image.cropPreviewAspectRatio, undefined, image.cropPreviewWidth, image.cropPreviewHeight);
                 onSetImages(prev => prev.map(img => 
                   img.id === image.id 
-                    ? { ...img, cropPreviewAspectRatio: undefined } 
+                    ? { ...img, cropPreviewAspectRatio: undefined, cropPreviewWidth: undefined, cropPreviewHeight: undefined } 
                     : img
                 ));
               }
@@ -1112,7 +1115,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
     }
   }, []);
 
-  const applyCropToImage = useCallback(async (imageId: string, aspectRatio: number | null, customCrop?: CropArea) => {
+  const applyCropToImage = useCallback(async (imageId: string, aspectRatio: number | null, customCrop?: CropArea, targetWidth?: number, targetHeight?: number) => {
     setImages(prev => {
       const image = prev.find(img => img.id === imageId);
       if (!image) return prev;
@@ -1203,14 +1206,28 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                       isCustomCropActive: false,
                       cropArea: undefined,
                       cropPreviewAspectRatio: undefined,
-                      originalFile: img.originalFile || img.file // Preserve original file
+                      originalFile: img.originalFile || img.file, // Preserve original file
+                      // Preserve originalWidth/Height if they exist (from previous resize)
+                      // They will be used for dimension display
+                      originalWidth: img.originalWidth,
+                      originalHeight: img.originalHeight,
+                      // Clear resize dimensions since crop changes the actual canvas size
+                      resizeWidth: undefined,
+                      resizeHeight: undefined
                     } 
                   : img
               );
             });
           } else if (aspectRatio !== null) {
             // Preset aspect ratio crop - use image processor
-            const processedBlob = await cropImage(image.file, { aspectRatio, customCrop: undefined });
+            let processedBlob = await cropImage(image.file, { aspectRatio, customCrop: undefined });
+            
+            // If target dimensions are specified, resize the cropped image to those exact dimensions
+            if (targetWidth && targetHeight) {
+              const croppedFile = new File([processedBlob], image.file.name, { type: image.file.type });
+              processedBlob = await resizeImageFile(croppedFile, targetWidth, targetHeight);
+            }
+            
             const processedDataURL = await blobToDataURL(processedBlob);
             
             const processedFile = new File(
@@ -1240,7 +1257,14 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                       isCustomCropActive: false,
                       cropArea: undefined,
                       cropPreviewAspectRatio: undefined,
-                      originalFile: img.originalFile || img.file
+                      originalFile: img.originalFile || img.file, // Preserve original file
+                      // Preserve originalWidth/Height if they exist (from previous resize)
+                      // They will be used for dimension display
+                      originalWidth: img.originalWidth,
+                      originalHeight: img.originalHeight,
+                      // Clear resize dimensions since crop changes the actual canvas size
+                      resizeWidth: undefined,
+                      resizeHeight: undefined
                     } 
                   : img
               );
@@ -1270,14 +1294,20 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
     });
   }, []);
 
-  const applyCropToSelected = useCallback(async (aspectRatio: number | null, customCrop?: CropArea) => {
+  const applyCropToSelected = useCallback(async (aspectRatio: number | null, customCrop?: CropArea, targetWidth?: number, targetHeight?: number) => {
     if (selectedImages.length === 0) return;
 
     // Show preview for preset crops
     if (aspectRatio !== null && !customCrop) {
       setImages(prev => prev.map(img => 
         img.selected 
-          ? { ...img, cropPreviewAspectRatio: aspectRatio, cropArea: undefined } 
+          ? { 
+              ...img, 
+              cropPreviewAspectRatio: aspectRatio, 
+              cropPreviewWidth: targetWidth,
+              cropPreviewHeight: targetHeight,
+              cropArea: undefined 
+            } 
           : img
       ));
       return;
@@ -1288,161 +1318,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
     
     // Apply crop to each selected image
     selectedIds.forEach(imageId => {
-      setImages(prev => {
-        const image = prev.find(img => img.id === imageId);
-        if (!image) return prev;
-
-        // Process asynchronously
-        (async () => {
-          try {
-            setImages(prevState => {
-              const currentImage = prevState.find(img => img.id === imageId);
-              if (!currentImage) return prevState;
-              return prevState.map(img => 
-                img.id === imageId 
-                  ? { ...img, isProcessing: true, error: undefined } 
-                  : img
-              );
-            });
-
-            // For preset crops with customCrop, crop the canvas
-            if (customCrop &&
-                Number.isFinite(customCrop.x) &&
-                Number.isFinite(customCrop.y) &&
-                Number.isFinite(customCrop.width) &&
-                Number.isFinite(customCrop.height) &&
-                customCrop.width > 0 &&
-                customCrop.height > 0) {
-              
-              // Get the canvas element
-              const container = document.querySelector(`[data-image-id="${imageId}"]`);
-              const canvas = container?.querySelector('canvas') as HTMLCanvasElement;
-              
-              if (!canvas) {
-                throw new Error('Canvas not found');
-              }
-              
-              // Create a new canvas with the cropped dimensions
-              const croppedCanvas = document.createElement('canvas');
-              croppedCanvas.width = Math.round(customCrop.width);
-              croppedCanvas.height = Math.round(customCrop.height);
-              const ctx = croppedCanvas.getContext('2d');
-              
-              if (!ctx) {
-                throw new Error('Could not get canvas context');
-              }
-              
-              // Draw the cropped portion of the original canvas
-              ctx.drawImage(
-                canvas,
-                customCrop.x, customCrop.y, customCrop.width, customCrop.height, // Source rect
-                0, 0, croppedCanvas.width, croppedCanvas.height // Destination rect
-              );
-              
-              // Convert to blob
-              const processedBlob = await new Promise<Blob>((resolve, reject) => {
-                croppedCanvas.toBlob((blob) => {
-                  if (blob) {
-                    resolve(blob);
-                  } else {
-                    reject(new Error('Failed to create blob'));
-                  }
-                }, image.file.type || 'image/png', 0.95);
-              });
-              
-              const processedDataURL = await blobToDataURL(processedBlob);
-              const processedFile = new File(
-                [processedBlob], 
-                image.file.name, 
-                { type: image.file.type || 'image/png' }
-              );
-              
-              setImages(prevState => {
-                const currentImage = prevState.find(img => img.id === imageId);
-                if (!currentImage) return prevState;
-
-                // Revoke old URL
-                if (currentImage.url.startsWith('blob:')) {
-                  URL.revokeObjectURL(currentImage.url);
-                }
-
-                return prevState.map(img => 
-                  img.id === imageId 
-                    ? { 
-                        ...img, 
-                        file: processedFile,
-                        url: processedDataURL,
-                        processedUrl: undefined,
-                        isProcessing: false,
-                        error: undefined,
-                        isCustomCropActive: false,
-                        cropArea: undefined,
-                        cropPreviewAspectRatio: undefined,
-                        originalFile: img.originalFile || img.file
-                      } 
-                    : img
-                );
-              });
-              return;
-            }
-            
-            // For preset aspect ratio without customCrop, use image processor
-            const processedBlob = await cropImage(image.file, { aspectRatio, customCrop: undefined });
-            const processedDataURL = await blobToDataURL(processedBlob);
-            
-            const processedFile = new File(
-              [processedBlob], 
-              image.file.name, 
-              { type: image.file.type }
-            );
-            
-            setImages(prevState => {
-              const currentImage = prevState.find(img => img.id === imageId);
-              if (!currentImage) return prevState;
-
-              // Revoke old URL
-              if (currentImage.url.startsWith('blob:')) {
-                URL.revokeObjectURL(currentImage.url);
-              }
-
-              return prevState.map(img => 
-                img.id === imageId 
-                  ? { 
-                      ...img, 
-                      file: processedFile,
-                      url: processedDataURL,
-                      processedUrl: undefined,
-                      isProcessing: false,
-                      error: undefined,
-                      isCustomCropActive: false,
-                      cropArea: undefined,
-                      cropPreviewAspectRatio: undefined
-                    } 
-                  : img
-              );
-            });
-          } catch (error) {
-            console.error('Failed to crop image:', error);
-            const errorMessage = error instanceof Error ? error.message : 'Failed to crop image';
-            
-            setImages(prevState => prevState.map(img => 
-              img.id === imageId 
-                ? { 
-                    ...img, 
-                    isProcessing: false,
-                    error: errorMessage
-                  } 
-                : img
-            ));
-          }
-        })();
-
-        return prev.map(img => 
-          img.id === imageId 
-            ? { ...img, isProcessing: true, error: undefined } 
-            : img
-        );
-      });
+      applyCropToImage(imageId, aspectRatio, customCrop, targetWidth, targetHeight);
     });
 
     setImages(prev => prev.map(img => 
@@ -1659,8 +1535,9 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                 );
               });
 
-              // Get original dimensions from the image file
-              const originalDimensions = await new Promise<{ width: number; height: number }>((resolve) => {
+              // Get current dimensions from the image file BEFORE resize
+              // This will be the "original" if no resize was done before, or the previous resize dimensions
+              const currentDimensions = await new Promise<{ width: number; height: number }>((resolve) => {
                 const img = new Image();
                 img.onload = () => {
                   resolve({ width: img.width, height: img.height });
@@ -1687,23 +1564,28 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
                   URL.revokeObjectURL(currentImage.url);
                 }
 
-                return prevState.map(img => 
-                  img.id === imageId 
-                    ? { 
-                        ...img, 
-                        file: processedFile,
-                        url: processedDataURL,
-                        processedUrl: undefined,
-                        isProcessing: false,
-                        error: undefined,
-                        // Preserve original dimensions if they exist, otherwise use current dimensions
-                        originalWidth: img.originalWidth || originalDimensions.width,
-                        originalHeight: img.originalHeight || originalDimensions.height,
-                        resizeWidth: width,
-                        resizeHeight: height
-                      } 
-                    : img
-                );
+                return prevState.map(img => {
+                  if (img.id !== imageId) return img;
+                  
+                  // Determine original dimensions:
+                  // - If originalWidth/Height already exist (from previous resize), preserve them
+                  // - Otherwise, use current dimensions (which are the true original on first resize)
+                  const finalOriginalWidth = img.originalWidth ?? currentDimensions.width;
+                  const finalOriginalHeight = img.originalHeight ?? currentDimensions.height;
+                  
+                  return {
+                    ...img, 
+                    file: processedFile,
+                    url: processedDataURL,
+                    processedUrl: undefined,
+                    isProcessing: false,
+                    error: undefined,
+                    originalWidth: finalOriginalWidth,
+                    originalHeight: finalOriginalHeight,
+                    resizeWidth: width,
+                    resizeHeight: height
+                  };
+                });
               });
             } catch (error) {
               console.error('Failed to resize image:', error);
@@ -2289,7 +2171,7 @@ export function EditorWorkspace({ onBack }: EditorWorkspaceProps) {
         {activeSection === 'crop' && (
           <CropPanel 
             selectedImages={selectedImages}
-            onApplyCrop={(aspectRatio) => applyCropToSelected(aspectRatio)}
+            onApplyCrop={(aspectRatio, targetWidth, targetHeight) => applyCropToSelected(aspectRatio, undefined, targetWidth, targetHeight)}
             onRotate={applyRotateToSelected}
             onFlip={applyFlipToSelected}
             onCustomCrop={handleCustomCrop}
